@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aesop Shift Checker - Fremont Unified</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <div class="container mx-auto p-6 max-w-6xl">
+        <div class="bg-white rounded-2xl shadow-2xl overflow-hidden">
+            <!-- Header -->
+            <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-white">
+                <h1 class="text-3xl font-bold flex items-center gap-3">
+                    <span>📚</span>
+                    Aesop Shift Checker
+                </h1>
+                <p class="mt-2 text-blue-100">Fremont Unified School District - Substitute Teacher</p>
+            </div>
+
+            <!-- Status Bar -->
+            <div class="bg-gray-50 border-b border-gray-200 p-4">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm text-gray-600">Last Checked:</p>
+                        <p class="font-semibold text-gray-800" id="lastChecked">Never</p>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-600">Status:</p>
+                        <p class="font-semibold" id="status">
+                            <span class="inline-block w-2 h-2 bg-green-500 rounded-full"></span>
+                            Ready
+                        </p>
+                    </div>
+                    <button 
+                        onclick="checkNow()" 
+                        id="checkButton"
+                        class="bg-blue-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-600 transition">
+                        Check Now
+                    </button>
+                </div>
+            </div>
+
+            <!-- Shifts List -->
+            <div class="p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-xl font-bold text-gray-800">Available Shifts</h2>
+                    <span class="bg-blue-100 text-blue-800 px-3 py-1 rounded-full font-semibold text-sm" id="shiftCount">
+                        0 shifts
+                    </span>
+                </div>
+
+                <div id="shiftsContainer" class="space-y-4">
+                    <div class="text-center py-12 text-gray-400">
+                        <p class="text-lg">No shifts loaded yet</p>
+                        <p class="text-sm mt-2">Click "Check Now" to search for available shifts</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Info Card -->
+        <div class="mt-6 bg-white rounded-xl shadow-lg p-6">
+            <h3 class="font-bold text-gray-800 mb-3">ℹ️ How it works</h3>
+            <ul class="space-y-2 text-sm text-gray-700">
+                <li>✅ Automatically checks for new shifts every 10 minutes</li>
+                <li>✅ Searches for Substitute Teacher positions in Fremont Unified</li>
+                <li>✅ Covers the next 30 business days</li>
+                <li>✅ Sends email notification to hkjagpal@hotmail.com when new shifts appear</li>
+                <li>✅ Dashboard refreshes automatically every 30 seconds</li>
+            </ul>
+        </div>
+    </div>
+
+    <script>
+        let isChecking = false;
+
+        async function loadShifts() {
+            try {
+                const response = await fetch('/api/shifts');
+                const data = await response.json();
+
+                // Update last checked
+                if (data.lastChecked) {
+                    const date = new Date(data.lastChecked);
+                    document.getElementById('lastChecked').textContent = date.toLocaleString();
+                }
+
+                // Update status
+                const statusEl = document.getElementById('status');
+                if (data.isChecking) {
+                    statusEl.innerHTML = '<span class="inline-block w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span> Checking...';
+                    isChecking = true;
+                } else {
+                    statusEl.innerHTML = '<span class="inline-block w-2 h-2 bg-green-500 rounded-full"></span> Ready';
+                    isChecking = false;
+                }
+
+                // Update shifts
+                const shiftsContainer = document.getElementById('shiftsContainer');
+                const shiftCount = document.getElementById('shiftCount');
+
+                if (data.shifts.length === 0) {
+                    shiftsContainer.innerHTML = `
+                        <div class="text-center py-12 text-gray-400">
+                            <p class="text-lg">No shifts available</p>
+                            <p class="text-sm mt-2">We'll notify you when new shifts appear!</p>
+                        </div>
+                    `;
+                    shiftCount.textContent = '0 shifts';
+                } else {
+                    shiftCount.textContent = `${data.shifts.length} shift${data.shifts.length !== 1 ? 's' : ''}`;
+                    
+                    shiftsContainer.innerHTML = data.shifts.map(shift => `
+                        <div class="border-2 border-gray-200 rounded-xl p-5 hover:border-blue-400 transition hover:shadow-md">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1">
+                                    <h3 class="text-lg font-bold text-gray-800 mb-2">${shift.title}</h3>
+                                    <div class="space-y-1 text-sm text-gray-600">
+                                        <p><span class="font-semibold">👤 Employee:</span> ${shift.employee || 'N/A'}</p>
+                                        <p><span class="font-semibold">🏫 School:</span> ${shift.school}</p>
+                                        <p><span class="font-semibold">📅 Date:</span> ${shift.date}</p>
+                                        <p><span class="font-semibold">🕐 Time:</span> ${shift.time}</p>
+                                        ${shift.duration && shift.duration !== 'N/A' ? `<p><span class="font-semibold">⏱️ Duration:</span> ${shift.duration}</p>` : ''}
+                                    </div>
+                                </div>
+                                <div class="flex flex-col gap-2">
+                                    <button onclick="acceptJob('${shift.id}')" class="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-600 transition text-sm">
+                                        ✅ Accept Job
+                                    </button>
+                                    <a href="https://login.frontlineeducation.com/login?signin=f031bc8d11b97a292b84a51dad08ca09&productId=ABSMGMT&clientId=ABSMGMT#/login" 
+                                       target="_blank"
+                                       class="bg-gray-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-600 transition text-sm text-center">
+                                        🔍 View in Aesop
+                                    </a>
+                                </div>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-3">Found: ${new Date(shift.foundAt).toLocaleString()}</p>
+                        </div>
+                    `).join('');
+                }
+
+            } catch (error) {
+                console.error('Error loading shifts:', error);
+            }
+        }
+
+        async function acceptJob(jobId) {
+            if (!confirm('Are you sure you want to accept this job?')) {
+                return;
+            }
+
+            const button = event.target;
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Accepting...';
+
+            try {
+                const response = await fetch(`/api/accept-job/${jobId}`);
+                const result = await response.json();
+
+                if (result.success) {
+                    button.textContent = '✅ Accepted!';
+                    button.classList.remove('bg-green-500', 'hover:bg-green-600');
+                    button.classList.add('bg-green-600');
+                    
+                    // Show success message
+                    alert(`Job accepted successfully! ${result.confirmed ? 'Confirmation received.' : 'Please check Aesop for confirmation.'}`);
+                    
+                    // Refresh shifts after a delay
+                    setTimeout(() => {
+                        loadShifts();
+                    }, 2000);
+                } else {
+                    button.textContent = '❌ Failed';
+                    button.classList.remove('bg-green-500', 'hover:bg-green-600');
+                    button.classList.add('bg-red-500');
+                    alert(`Failed to accept job: ${result.message}`);
+                }
+            } catch (error) {
+                console.error('Error accepting job:', error);
+                button.textContent = '❌ Error';
+                button.classList.remove('bg-green-500', 'hover:bg-green-600');
+                button.classList.add('bg-red-500');
+                alert('Error accepting job. Please try again or accept directly in Aesop.');
+            } finally {
+                // Restore button after 5 seconds if not successful
+                if (!button.textContent.includes('Accepted')) {
+                    setTimeout(() => {
+                        button.disabled = false;
+                        button.textContent = originalText;
+                        button.classList.remove('bg-red-500');
+                        button.classList.add('bg-green-500', 'hover:bg-green-600');
+                    }, 5000);
+                }
+            }
+        }
+
+        async function checkNow() {
+            if (isChecking) {
+                alert('A check is already in progress. Please wait...');
+                return;
+            }
+
+            const button = document.getElementById('checkButton');
+            button.disabled = true;
+            button.textContent = 'Checking...';
+
+            try {
+                await fetch('/api/check-now');
+                // Wait a bit then reload
+                setTimeout(loadShifts, 2000);
+            } catch (error) {
+                console.error('Error triggering check:', error);
+            } finally {
+                setTimeout(() => {
+                    button.disabled = false;
+                    button.textContent = 'Check Now';
+                }, 3000);
+            }
+        }
+
+        // Load shifts on page load
+        loadShifts();
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadShifts, 30000);
+    </script>
+</body>
+</html>
