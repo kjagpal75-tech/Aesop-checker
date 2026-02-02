@@ -313,6 +313,8 @@ async function checkForShifts() {
 
     isChecking = true;
     console.log(`[${new Date().toLocaleString()}] Checking for shifts...`);
+    
+    let error = null; // Track if there was an error
 
     // Validate required configuration
     if (!CONFIG.username || !CONFIG.password) {
@@ -573,11 +575,16 @@ async function checkForShifts() {
             console.log('No new shifts found');
         }
 
-    } catch (error) {
-        console.error('Error checking for shifts:', error);
+        // Update available shifts for dashboard even if no new shifts
+        availableShifts = [...filteredShifts];
+        lastChecked = new Date();
+
+    } catch (err) {
+        error = err; // Store the error for the finally block
+        console.error('Error checking for shifts:', err);
         
         // Send error notification
-        await sendErrorNotification(error, "Job Check Failed");
+        await sendErrorNotification(err, "Job Check Failed");
         
         // If there's an error, reset the session to force re-login next time
         console.log('Resetting session due to error...');
@@ -595,6 +602,22 @@ async function checkForShifts() {
         }
     } finally {
         isChecking = false;
+        
+        // IMPORTANT: Always close browser after check to prevent memory leaks
+        // This ensures Chrome instances don't accumulate on the VM
+        if (browser && !error) {
+            try {
+                console.log('Closing browser after successful check to prevent memory leaks...');
+                await browser.close();
+                browser = null;
+                page = null;
+                console.log('Browser closed successfully');
+            } catch (closeError) {
+                console.log('Error closing browser after successful check:', closeError.message);
+                browser = null;
+                page = null;
+            }
+        }
     }
 }
 
