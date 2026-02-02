@@ -280,8 +280,9 @@ async function loginAndMaintainSession() {
     }
 
     console.log('Login submitted, waiting for page to load...');
-    await page.waitForTimeout(5000);
-
+	// OLD CODE
+  //  await page.waitForTimeout(5000);
+      await new Promise(resolve => setTimeout(resolve, 5000));
     const currentUrl = page.url();
     console.log('Current URL after login:', currentUrl);
     
@@ -299,8 +300,8 @@ async function loginAndMaintainSession() {
     }
 
     // Wait for any dynamic content to load after login
-    await page.waitForTimeout(3000);
-    
+    //await page.waitForTimeout(3000);
+      await new Promise(resolve => setTimeout(resolve, 3000)); 
     return { browser, page };
 }
 
@@ -592,7 +593,7 @@ async function sendEmailNotification(shifts) {
 
     const mailOptions = {
         from: CONFIG.emailFrom,
-        to: CONFIG.emailTo,
+        to: CONFIG.emailTo.split(',').map(email => email.trim()),
         subject: `🔔 ${shifts.length} New Shift${shifts.length > 1 ? 's' : ''} Available - ${CONFIG.district}`,
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff;">
