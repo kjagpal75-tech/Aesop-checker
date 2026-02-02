@@ -374,105 +374,166 @@ async function checkForShifts() {
             const afterLoginHtml = fs.readFileSync('after-login.html', 'utf8');
             console.log('Read after-login.html file, length:', afterLoginHtml.length);
             
-            // Simple piece-by-piece extraction approach
-            console.log('Using simple piece-by-piece extraction...');
+            // Parse the pageVars object to get availJobs
+            const pageVarsMatch = afterLoginHtml.match(/var pageVars = ({[\s\S]*?});/);
+            console.log(`pageVars match: ${!!pageVarsMatch}`);
             
-            // Look for all available jobs by finding SubstituteId: null
-            const availableJobSections = afterLoginHtml.split('"SubstituteId":null');
-            
-            console.log(`Found ${availableJobSections.length - 1} sections with SubstituteId: null`);
-            
-            for (let i = 1; i < availableJobSections.length; i++) {
+            if (pageVarsMatch) {
                 try {
-                    const section = availableJobSections[i];
-                    const previousSection = availableJobSections[i-1];
+                    // Extract just the object part, removing "var pageVars = " and trailing ";"
+                    const pageVarsText = pageVarsMatch[0].replace(/^var pageVars = /, '').replace(/;$/, '');
+                    console.log(`pageVars text length: ${pageVarsText.length}`);
+                    console.log(`pageVars text preview: ${pageVarsText.substring(0, 500)}...`);
                     
-                    console.log(`\n--- Processing available job section ${i} ---`);
+                    // Use eval to parse the JavaScript object
+                    const pageVars = eval(`(${pageVarsText})`);
                     
-                    // The ID is in the previous section, so look there
-                    const idMatch = previousSection.match(/"Id":(\d+)/);
-                    const titleMatch = section.match(/"WorkerTitle":"([^"]+)"/);
-                    const firstNameMatch = section.match(/"WorkerFirstName":"([^"]+)"/);
-                    const lastNameMatch = section.match(/"WorkerLastName":"([^"]+)"/);
-                    const startMatch = previousSection.match(/"Start":"([^"]+)"/);
-                    // Look for school and duration in both sections
-                    let schoolMatch = section.match(/"Name":"([^"]+)"/);
-                    let durationMatch = section.match(/"Duration":"([^"]+)"/);
-                    
-                    if (!schoolMatch) {
-                        schoolMatch = previousSection.match(/"Name":"([^"]+)"/);
-                    }
-                    if (!durationMatch) {
-                        durationMatch = previousSection.match(/"Duration":"([^"]+)"/);
+                    console.log(`pageVars keys:`, Object.keys(pageVars));
+                    console.log(`pageVars.availJobs: ${!!pageVars.availJobs}`);
+                    if (pageVars.availJobs) {
+                        console.log(`pageVars.availJobs keys:`, Object.keys(pageVars.availJobs));
+                        console.log(`pageVars.availJobs.list: ${!!pageVars.availJobs.list}`);
+                        console.log(`pageVars.availJobs.fromDb: ${pageVars.availJobs.fromDb}`);
                     }
                     
-                    console.log(`ID match: ${!!idMatch}`, idMatch ? idMatch[1] : 'N/A');
-                    console.log(`Title match: ${!!titleMatch}`, titleMatch ? titleMatch[1] : 'N/A');
-                    console.log(`FirstName match: ${!!firstNameMatch}`, firstNameMatch ? firstNameMatch[1] : 'N/A');
-                    console.log(`LastName match: ${!!lastNameMatch}`, lastNameMatch ? lastNameMatch[1] : 'N/A');
-                    console.log(`Start match: ${!!startMatch}`, startMatch ? startMatch[1] : 'N/A');
-                    console.log(`School match: ${!!schoolMatch}`, schoolMatch ? schoolMatch[1] : 'N/A');
-                    console.log(`Duration match: ${!!durationMatch}`, durationMatch ? durationMatch[1] : 'N/A');
-                    
-                    if (idMatch && titleMatch) {
-                        const jobId = idMatch[1];
-                        const jobTitle = titleMatch[1];
-                        const employeeName = `${firstNameMatch ? firstNameMatch[1] : ''} ${lastNameMatch ? lastNameMatch[1] : ''}`.trim();
+                    if (pageVars && pageVars.availJobs && pageVars.availJobs.list) {
+                        console.log(`Found ${pageVars.availJobs.list.length} available jobs in pageVars.availJobs.list`);
                         
-                        console.log(`ID: ${jobId}`);
-                        console.log(`Title: ${jobTitle}`);
-                        console.log(`Employee: ${employeeName}`);
-                        console.log(`School: ${schoolMatch ? schoolMatch[1] : 'N/A'}`);
-                        console.log(`Duration: ${durationMatch ? durationMatch[1].substring(0, 5) : 'N/A'}`);
-                        console.log(`Start: ${startMatch ? startMatch[1] : 'N/A'}`);
-                        
-                        // Check if this is a position we want to include
-                        const isDesiredPosition = jobTitle.toLowerCase().includes('substitute') ||
-                                                      jobTitle.toLowerCase().includes('teacher') ||
-                                                      jobTitle.toLowerCase().includes('sub') ||
-                                                      jobTitle.toLowerCase().includes('physical education') ||
-                                                      jobTitle.toLowerCase().includes('pe') ||
-                                                      jobTitle.toLowerCase().includes('math') ||
-                                                      jobTitle.toLowerCase().includes('science') ||
-                                                      jobTitle.toLowerCase().includes('english') ||
-                                                      jobTitle.toLowerCase().includes('history') ||
-                                                      jobTitle.toLowerCase().includes('art') ||
-                                                      jobTitle.toLowerCase().includes('music') ||
-                                                      jobTitle.toLowerCase().includes('coach');
-                        
-                        console.log(`Is desired position: ${isDesiredPosition}`);
-                        
-                        if (isDesiredPosition) {
-                            // Format date and time
-                            const startDate = startMatch ? new Date(startMatch[1]) : null;
-                            const dateStr = startDate ? startDate.toLocaleDateString() : 'N/A';
-                            const timeStr = startDate ? startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'}) : 'N/A';
+                        for (const job of pageVars.availJobs.list) {
+                            console.log(`\n--- Processing job from pageVars.availJobs.list ---`);
+                            console.log(`Job ID: ${job.Id}`);
+                            console.log(`Title: ${job.WorkerTitle}`);
+                            console.log(`Employee: ${job.WorkerFirstName} ${job.WorkerLastName}`);
+                            console.log(`School: ${job.Items && job.Items[0] ? job.Items[0].Institution.Name : 'N/A'}`);
+                            console.log(`Start: ${job.Start}`);
+                            console.log(`EndDate: ${job.EndDate}`);
+                            console.log(`Items count: ${job.Items ? job.Items.length : 0}`);
+                            console.log(`SubstituteId: ${job.SubstituteId}`);
                             
-                            const shiftData = {
-                                id: jobId,
-                                title: jobTitle,
-                                employee: employeeName,
-                                school: schoolMatch ? schoolMatch[1] : 'See details in Aesop',
-                                date: dateStr,
-                                time: timeStr,
-                                duration: durationMatch ? durationMatch[1].substring(0, 5) : 'N/A',
-                                foundAt: new Date().toISOString()
-                            };
-                            
-                            console.log(`✅ ADDING JOB: ${jobTitle} at ${shiftData.school}`);
-                            shifts.push(shiftData);
-                        } else {
-                            console.log(`❌ SKIPPING JOB - Not desired position: ${jobTitle}`);
+                            // Only process jobs with SubstituteId: null (available jobs)
+                            if (job.SubstituteId === null) {
+                                // Accept all available jobs - no position filtering needed
+                                console.log(`Processing available job: ${job.WorkerTitle}`);
+                                
+                                // Format date and time using Items array or Start/EndDate
+                                let dateStr = 'N/A';
+                                let timeStr = 'N/A';
+                                
+                                if (job.Items && job.Items.length > 0) {
+                                    // Parse the Items array to get individual shifts
+                                    const items = job.Items;
+                                    const firstShift = items[items.length - 1]; // Last item is first day
+                                    const lastShift = items[0]; // First item is last day
+                                    
+                                    const firstDate = new Date(firstShift.Start);
+                                    const lastDate = new Date(lastShift.Start);
+                                    
+                                    // Check if it's a multi-day range
+                                    if (firstDate.toDateString() !== lastDate.toDateString()) {
+                                        dateStr = `${firstDate.toLocaleDateString()} - ${lastDate.toLocaleDateString()}`;
+                                        console.log(`Using date range from Items: ${dateStr}`);
+                                    } else {
+                                        // Single day
+                                        dateStr = firstDate.toLocaleDateString();
+                                        console.log(`Using single date from Items: ${dateStr}`);
+                                    }
+                                    
+                                    // Get time range from first and last shifts
+                                    const firstTime = new Date(firstShift.Start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                    const lastTime = new Date(lastShift.End).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                    timeStr = `${firstTime} - ${lastTime}`;
+                                    
+                                } else if (job.Start && job.EndDate) {
+                                    // Fallback to Start/EndDate fields
+                                    const startDate = new Date(job.Start);
+                                    const endDate = new Date(job.EndDate);
+                                    
+                                    if (startDate.toDateString() !== endDate.toDateString()) {
+                                        dateStr = `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
+                                        console.log(`Using date range from Start/EndDate: ${dateStr}`);
+                                    } else {
+                                        dateStr = startDate.toLocaleDateString();
+                                        console.log(`Using single date from Start: ${dateStr}`);
+                                    }
+                                    
+                                    const startTime = startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                    const endTime = endDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+                                    timeStr = `${startTime} - ${endTime}`;
+                                }
+                                
+                                const shiftData = {
+                                    id: job.Id,
+                                    title: job.WorkerTitle,
+                                    employee: `${job.WorkerFirstName} ${job.WorkerLastName}`.trim(),
+                                    school: job.Items && job.Items[0] ? job.Items[0].Institution.Name : 'See details in Aesop',
+                                    date: dateStr,
+                                    time: timeStr,
+                                    duration: job.Items && job.Items[0] ? job.Items[0].Duration.substring(0, 5) : 'N/A',
+                                    foundAt: new Date().toISOString()
+                                };
+                                
+                                console.log(`✅ ADDING JOB: ${job.WorkerTitle} at ${shiftData.school}`);
+                                shifts.push(shiftData);
+                            } else {
+                                console.log(`❌ SKIPPING JOB - Already has substitute assigned: ${job.SubstituteId}`);
+                            }
                         }
                     } else {
-                        console.log(`Section ${i} missing required fields (ID: ${!!idMatch}, Title: ${!!titleMatch})`);
+                        console.log('No availJobs.list found in pageVars');
                     }
-                } catch (sectionError) {
-                    console.error(`Error processing section ${i}:`, sectionError);
+                } catch (parseError) {
+                    console.log('Error parsing pageVars with eval:', parseError.message);
+                    console.log('Parse error details:', parseError.stack);
+                    
+                    // Try to extract availJobs using regex as fallback
+                    console.log('Trying regex fallback for availJobs...');
+                    const availJobsRegex = /"availJobs":\{[^}]*"list":\s*\[([^\]]+)\]/;
+                    const availJobsMatch = afterLoginHtml.match(availJobsRegex);
+                    
+                    if (availJobsMatch) {
+                        console.log('Found availJobs with regex, parsing manually...');
+                        const availJobsText = `[${availJobsMatch[1]}]`;
+                        try {
+                            const availJobs = JSON.parse(availJobsText);
+                            console.log(`Found ${availJobs.length} jobs with regex fallback`);
+                            
+                            for (const job of availJobs) {
+                                // Process each job...
+                                if (job.SubstituteId === null) {
+                                    // Add job processing logic here
+                                    console.log(`Found available job: ${job.Id} - ${job.WorkerTitle}`);
+                                    // ... rest of job processing
+                                }
+                            }
+                        } catch (regexError) {
+                            console.log('Regex fallback also failed:', regexError.message);
+                        }
+                    }
+                }
+            } else {
+                console.log('No pageVars object found in HTML');
+                
+                // Try alternative search for pageVars
+                const altPageVarsMatch = afterLoginHtml.match(/pageVars\s*=\s*{[\s\S]*?}/);
+                if (altPageVarsMatch) {
+                    console.log('Found alternative pageVars match');
+                    console.log('Alternative pageVars preview:', altPageVarsMatch[0].substring(0, 200));
+                }
+                
+                // Try searching for curJobs
+                const curJobsMatch = afterLoginHtml.match(/curJobs:\s*\[([^\]]+)\]/);
+                if (curJobsMatch) {
+                    console.log('Found curJobs array');
+                    console.log('curJobs preview:', curJobsMatch[1].substring(0, 200));
+                }
+                
+                // Try searching for availJobs
+                const availJobsMatch = afterLoginHtml.match(/availJobs:\s*\{[^}]*list:\s*\[([^\]]+)\]/);
+                if (availJobsMatch) {
+                    console.log('Found availJobs object');
+                    console.log('availJobs preview:', availJobsMatch[0].substring(0, 200));
                 }
             }
-            
-            console.log(`\nTotal jobs found: ${shifts.length}`);
             
         } catch (fileError) {
             console.error('Error reading after-login.html file:', fileError);
