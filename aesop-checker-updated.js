@@ -424,8 +424,8 @@ async function checkForShifts() {
                                 if (job.Items && job.Items.length > 0) {
                                     // Parse the Items array to get individual shifts
                                     const items = job.Items;
-                                    const firstShift = items[items.length - 1]; // Last item is first day
-                                    const lastShift = items[0]; // First item is last day
+                                    const firstShift = items[0]; // First item is first day
+                                    const lastShift = items[items.length - 1]; // Last item is last day
                                     
                                     const firstDate = new Date(firstShift.Start);
                                     const lastDate = new Date(lastShift.Start);
