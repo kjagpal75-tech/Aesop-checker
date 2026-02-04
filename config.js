@@ -19,7 +19,7 @@ module.exports = {
     oauthAccessToken: process.env.OAUTH_ACCESS_TOKEN,
     
     // Search Settings
-    checkInterval: parseInt(process.env.CHECK_INTERVAL) || 10 * 60 * 1000, // 10 minutes default
+    checkInterval: parseInt(process.env.CHECK_INTERVAL) || 5 * 60 * 1000, // 5 minutes default (configurable via CHECK_INTERVAL env var)
     position: process.env.POSITION || 'Substitute Teacher',
     district: process.env.DISTRICT || 'Fremont Unified School District'
 };
