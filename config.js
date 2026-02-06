@@ -20,6 +20,9 @@ module.exports = {
     
     // Search Settings
     checkInterval: parseInt(process.env.CHECK_INTERVAL) || 5 * 60 * 1000, // 5 minutes default (configurable via CHECK_INTERVAL env var)
+    realTimeMode: process.env.REAL_TIME_MODE === 'true', // Instant notifications (keeps browser open)
+    realTimeInterval: parseInt(process.env.REAL_TIME_INTERVAL) || 30 * 1000, // 30 seconds for real-time checks
+    publicUrl: process.env.PUBLIC_URL || 'http://localhost:3000', // Public URL for email links and API calls
     position: process.env.POSITION || 'Substitute Teacher',
     district: process.env.DISTRICT || 'Fremont Unified School District'
 };

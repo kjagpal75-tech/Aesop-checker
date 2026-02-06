@@ -145,6 +145,15 @@
             }
         }
 
+        // Get the current base URL (works for both localhost and public IP)
+        const baseUrl = window.location.origin;
+
+        // Load shifts on page load
+        loadShifts();
+
+        // Auto-refresh every 30 seconds
+        setInterval(loadShifts, 30000);
+        
         async function acceptJob(jobId) {
             if (!confirm('Are you sure you want to accept this job?')) {
                 return;
@@ -156,7 +165,7 @@
             button.textContent = 'Accepting...';
 
             try {
-                const response = await fetch(`/api/accept-job/${jobId}`);
+                const response = await fetch(`${baseUrl}/api/accept-job/${jobId}`);
                 const result = await response.json();
 
                 if (result.success) {
