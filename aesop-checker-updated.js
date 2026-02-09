@@ -668,11 +668,11 @@ async function sendEmailNotification(shifts) {
             </div>
             ${shift.duration && shift.duration !== 'N/A' ? `<p style="margin: 5px 0;"><strong style="color: #333;">⏱️ Duration:</strong> ${shift.duration}</p>` : ''}
             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
-                <a href="${CONFIG.publicUrl}/api/accept-job/${shift.id}" style="background-color: #28a745; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-right: 10px;">✅ Accept Job</a>
+                <a href="${CONFIG.aesopUrl}" style="background-color: #28a745; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-right: 10px;">✅ Accept Job in Aesop</a>
                 <a href="${CONFIG.aesopUrl}" style="background-color: #6c757d; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">🔍 View in Aesop</a>
             </div>
             <p style="margin: 10px 0 0 0; font-size: 12px; color: #666; font-style: italic;">
-                ⚠️ Accept button works when connected to your local network. Otherwise, login to Aesop directly.
+                💡 Click "Accept Job in Aesop" to login and accept the substitute position directly.
             </p>
         </div>
     `).join('');
