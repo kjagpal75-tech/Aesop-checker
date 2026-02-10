@@ -800,7 +800,12 @@ async function checkForShifts() {
                                     const currentTime = new Date();
                                     const hoursInFuture = (jobStartTime - currentTime) / (1000 * 60 * 60);
                                     
-                                    console.log(`🕐 Job ${job.Id} is ${hoursInFuture.toFixed(1)} hours in the future`);
+                                    console.log(`🕐 AUTO-ACCEPT DEBUG: Job ${job.Id}`);
+                                    console.log(`📅 Job Start Time: ${jobStartTime.toISOString()}`);
+                                    console.log(`🕐 Current Time: ${currentTime.toISOString()}`);
+                                    console.log(`⏰ Hours in Future: ${hoursInFuture.toFixed(1)}`);
+                                    console.log(`🎯 Threshold: ${CONFIG.autoAcceptHoursInFuture} hours`);
+                                    console.log(`🔧 Auto-Accept Enabled: ${CONFIG.autoAcceptEnabled}`);
                                     
                                     if (hoursInFuture >= CONFIG.autoAcceptHoursInFuture) {
                                         console.log(`🎯 AUTO-ACCEPT QUALIFIED: Job ${job.Id} is ${hoursInFuture.toFixed(1)} hours in future (>= ${CONFIG.autoAcceptHoursInFuture}h)`);
@@ -818,12 +823,21 @@ async function checkForShifts() {
                                                         
                                                         // Send special auto-accept notification
                                                         sendAutoAcceptNotification(shiftData, hoursInFuture);
+                                                        
+                                                        // Send immediate confirmation notification
+                                                        sendAutoAcceptConfirmation(job.Id, shiftData, hoursInFuture);
                                                     } else {
                                                         console.log(`❌ AUTO-ACCEPT FAILED: Job ${job.Id} - ${result.message}`);
+                                                        
+                                                        // Send failure notification
+                                                        sendAutoAcceptFailure(job.Id, shiftData, result.message);
                                                     }
                                                 })
                                                 .catch(error => {
                                                     console.error(`💥 AUTO-ACCEPT ERROR: Job ${job.Id} - ${error.message}`);
+                                                    
+                                                    // Send error notification
+                                                    sendAutoAcceptFailure(job.Id, shiftData, error.message);
                                                 });
                                         }
                                     } else {
@@ -995,6 +1009,128 @@ async function testEmailConfiguration() {
     } catch (error) {
         console.error('Email configuration test failed:', error.message);
         return false;
+    }
+}
+
+// Send immediate auto-accept confirmation notification
+async function sendAutoAcceptConfirmation(jobId, shift, hoursInFuture) {
+    if (!transporter) {
+        console.log('Email transporter not configured - skipping auto-accept confirmation');
+        return;
+    }
+
+    const mailOptions = {
+        from: CONFIG.emailFrom,
+        to: CONFIG.emailTo,
+        subject: `🎉 CONFIRMED: Auto-Accepted Job ${jobId} - ${shift.title}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+                <div style="background: linear-gradient(135deg, #28a745 0%, #20c997 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <h1 style="margin: 0; font-size: 28px;">🎉 AUTO-ACCEPT CONFIRMED!</h1>
+                    <p style="margin: 10px 0 0 0; font-size: 18px; opacity: 0.9;">Job successfully accepted automatically</p>
+                </div>
+                
+                <div style="padding: 30px; background-color: #f8f9fa;">
+                    <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                        <h2 style="color: #333; margin: 0 0 20px 0; font-size: 22px;">✅ Successfully Accepted</h2>
+                        
+                        <div style="background-color: #d4edda; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #28a745;">
+                            <p style="margin: 0; color: #155724; font-weight: bold;">🎯 Job ID: ${jobId}</p>
+                            <p style="margin: 5px 0 0 0; color: #155724;">Position: ${shift.title}</p>
+                            <p style="margin: 5px 0 0 0; color: #155724;">School: ${shift.school}</p>
+                            <p style="margin: 5px 0 0 0; color: #155724;">Date: ${shift.date}</p>
+                            <p style="margin: 5px 0 0 0; color: #155724;">Time: ${shift.time}</p>
+                            <p style="margin: 5px 0 0 0; color: #155724;">Hours in Future: ${hoursInFuture.toFixed(1)}h</p>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 25px;">
+                            <a href="${CONFIG.aesopUrl}" 
+                               target="_blank"
+                               style="background-color: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">
+                                🔍 View in Aesop
+                            </a>
+                        </div>
+                        
+                        <p style="margin: 20px 0 0 0; font-size: 14px; color: #666; text-align: center; font-style: italic;">
+                            💼 This job has been automatically accepted and confirmed in your Aesop account
+                        </p>
+                    </div>
+                </div>
+                
+                <div style="background-color: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; border-top: 1px solid #e9ecef;">
+                    <p style="margin: 0; color: #666; font-size: 12px;">
+                        🎉 Auto-accepted at ${new Date().toLocaleString()} | Aesop Shift Checker
+                    </p>
+                </div>
+            </div>
+        `
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log('✅ Auto-accept confirmation email sent successfully');
+    } catch (error) {
+        console.error('❌ Error sending auto-accept confirmation:', error);
+    }
+}
+
+// Send auto-accept failure notification
+async function sendAutoAcceptFailure(jobId, shift, errorMessage) {
+    if (!transporter) {
+        console.log('Email transporter not configured - skipping auto-accept failure notification');
+        return;
+    }
+
+    const mailOptions = {
+        from: CONFIG.emailFrom,
+        to: CONFIG.emailTo,
+        subject: `❌ FAILED: Auto-Accept Job ${jobId} - ${shift.title}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+                <div style="background: linear-gradient(135deg, #dc3545 0%, #c82333 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <h1 style="margin: 0; font-size: 28px;">❌ AUTO-ACCEPT FAILED</h1>
+                    <p style="margin: 10px 0 0 0; font-size: 18px; opacity: 0.9;">Could not automatically accept job</p>
+                </div>
+                
+                <div style="padding: 30px; background-color: #f8f9fa;">
+                    <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                        <h2 style="color: #333; margin: 0 0 20px 0; font-size: 22px;">❌ Acceptance Failed</h2>
+                        
+                        <div style="background-color: #f8d7da; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #dc3545;">
+                            <p style="margin: 0; color: #721c24; font-weight: bold;">🎯 Job ID: ${jobId}</p>
+                            <p style="margin: 5px 0 0 0; color: #721c24;">Position: ${shift.title}</p>
+                            <p style="margin: 5px 0 0 0; color: #721c24;">School: ${shift.school}</p>
+                            <p style="margin: 5px 0 0 0; color: #721c24;">Error: ${errorMessage}</p>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 25px;">
+                            <a href="${CONFIG.aesopUrl}" 
+                               target="_blank"
+                               style="background-color: #dc3545; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">
+                                🔍 Accept Manually in Aesop
+                            </a>
+                        </div>
+                        
+                        <p style="margin: 20px 0 0 0; font-size: 14px; color: #666; text-align: center; font-style: italic;">
+                            ⚠️ Auto-accept failed - please accept this job manually in Aesop
+                        </p>
+                    </div>
+                </div>
+                
+                <div style="background-color: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; border-top: 1px solid #e9ecef;">
+                    <p style="margin: 0; color: #666; font-size: 12px;">
+                        ❌ Auto-accept failed at ${new Date().toLocaleString()} | Aesop Shift Checker
+                    </p>
+                </div>
+            </div>
+        `
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log('✅ Auto-accept failure email sent successfully');
+    } catch (error) {
+        console.error('❌ Error sending auto-accept failure:', error);
     }
 }
 
