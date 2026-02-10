@@ -340,21 +340,34 @@ async function acceptJob(jobId) {
     console.log(`Attempting to accept job ${jobId}...`);
     
     let browser;
-    try {
-        browser = await puppeteer.launch({
-            headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+    let retryCount = 0;
+    const maxRetries = 2;
+    
+    while (retryCount < maxRetries) {
+        try {
+            browser = await puppeteer.launch({
+                headless: 'new',
+                args: ['--no-sandbox', '--disable-setuid-sandbox']
+            });
 
-        const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
+            const page = await browser.newPage();
+            await page.setViewport({ width: 1280, height: 800 });
+            
+            // Set error handling for frame detachment
+            page.on('error', (error) => {
+                console.log('Page error detected:', error.message);
+            });
+            
+            page.on('pageerror', (error) => {
+                console.log('Page error detected:', error.message);
+            });
 
-        // Login to Aesop
-        console.log('Logging in to accept job...');
-        await page.goto(CONFIG.aesopUrl, { 
-            waitUntil: 'networkidle2', 
-            timeout: 60000 
-        });
+            // Login to Aesop
+            console.log('Logging in to accept job...');
+            await page.goto(CONFIG.aesopUrl, { 
+                waitUntil: 'networkidle2', 
+                timeout: 60000 
+            });
 
         await page.waitForSelector('#Username', { timeout: 10000 });
         await page.waitForSelector('#Password', { timeout: 10000 });
@@ -425,10 +438,46 @@ async function acceptJob(jobId) {
 
     } catch (error) {
         if (browser) {
-            await browser.close();
+            try {
+                await browser.close();
+            } catch (closeError) {
+                console.log('Error closing browser during retry:', closeError.message);
+            }
         }
-        throw error;
+        
+        // Check for frame detachment error and retry
+        if (error.message.includes('Navigating frame was detached') || 
+            error.message.includes('Target closed') ||
+            error.message.includes('Session closed') ||
+            error.message.includes('Protocol error')) {
+            
+            retryCount++;
+            console.log(`🔄 Frame detached error (attempt ${retryCount}/${maxRetries}), retrying...`);
+            
+            if (retryCount < maxRetries) {
+                // Wait a bit before retrying
+                await new Promise(resolve => setTimeout(resolve, 2000));
+                continue; // Retry the while loop
+            } else {
+                return {
+                    success: false,
+                    message: `Failed to accept job ${jobId} after ${maxRetries} attempts due to browser instability: ${error.message}`
+                };
+            }
+        }
+        
+        // For other errors, don't retry
+        return {
+            success: false,
+            message: `Failed to accept job ${jobId}: ${error.message}`
+        };
     }
+    
+    // This should never be reached, but just in case
+    return {
+        success: false,
+        message: `Failed to accept job ${jobId}: Unknown error`
+    };
 }
 
 // Function to get next 30 business days
