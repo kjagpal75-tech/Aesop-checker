@@ -125,54 +125,46 @@ app.get('/accept/:jobId', async (req, res) => {
                     <div class="text-center">
                         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
                         <h1 class="text-2xl font-bold text-gray-800 mb-2">Accepting Job...</h1>
-                        <p class="text-gray-600 mb-4">Please wait while we accept your substitute position in Aesop...</p>
-                        <div id="status" class="text-sm text-gray-500">Initializing...</div>
-                        <div id="progress" class="w-full bg-gray-200 rounded-full h-2 mt-4">
-                            <div id="progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                        <p class="text-gray-600 mb-4">Please wait while we accept this job for you.</p>
+                        
+                        <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6">
+                            <p class="text-sm text-blue-800"> Job ID: ${jobId}</p>
+                            <p class="text-sm text-blue-800"> Processing: <span id="timer">0</span>s</p>
                         </div>
+                        
+                        <div id="status" class="text-sm text-gray-600">Initializing...</div>
+                        
+                        <script>
+                            let seconds = 0;
+                            const timer = setInterval(() => {
+                                seconds++;
+                                document.getElementById('timer').textContent = seconds;
+                                
+                                // Check status every 2 seconds
+                                fetch('/api/accept-job-status/${jobId}')
+                                    .then(response => response.json())
+                                    .then(data => {
+                                        const statusEl = document.getElementById('status');
+                                        if (data.success) {
+                                            clearInterval(timer);
+                                            window.location.href = '/accept-success/${jobId}';
+                                        } else if (data.status === 'timeout') {
+                                            clearInterval(timer);
+                                            window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent('Acceptance timed out. Please try manually.');
+                                        } else if (data.status === 'error') {
+                                            clearInterval(timer);
+                                            window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent(data.message);
+                                        } else {
+                                            statusEl.textContent = data.message || 'Processing...';
+                                        }
+                                    })
+                                    .catch(error => {
+                                        console.error('Status check error:', error);
+                                    });
+                            }, 2000);
+                        </script>
                     </div>
                 </div>
-                
-                <script>
-                    const statusEl = document.getElementById('status');
-                    const progressBar = document.getElementById('progress-bar');
-                    let attempts = 0;
-                    const maxAttempts = 30; // 30 attempts = 60 seconds max
-                    
-                    function updateStatus(status, progress) {
-                        statusEl.textContent = status;
-                        progressBar.style.width = progress + '%';
-                    }
-                    
-                    function checkStatus() {
-                        attempts++;
-                        
-                        if (attempts === 1) updateStatus('Connecting to Aesop...', 20);
-                        if (attempts === 3) updateStatus('Logging in and finding job...', 40);
-                        if (attempts === 6) updateStatus('Accepting position...', 60);
-                        if (attempts === 12) updateStatus('Confirming acceptance...', 80);
-                        
-                        fetch('/api/accept-job-status/${jobId}')
-                            .then(response => response.json())
-                            .then(data => {
-                                if (data.success) {
-                                    updateStatus('Job accepted successfully!', 100);
-                                    setTimeout(() => {
-                                        window.location.href = '/accept-success/${jobId}';
-                                    }, 1000);
-                                } else if (data.status === 'failed') {
-                                    updateStatus('Acceptance failed', 0);
-                                    setTimeout(() => {
-                                        window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent(data.message || 'Unknown error');
-                                    }, 1000);
-                                } else if (attempts >= maxAttempts) {
-                                    updateStatus('Taking longer than expected...', 90);
-                                    setTimeout(() => {
-                                        window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent('Acceptance timed out. Please check manually in Aesop.');
-                                    }, 2000);
-                                } else {
-                                    // Continue polling
-                                    setTimeout(checkStatus, 2000);
                                 }
                             })
                             .catch(error => {
