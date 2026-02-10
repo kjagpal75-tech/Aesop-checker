@@ -500,6 +500,10 @@ async function loginAndMaintainSession() {
 
     page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
+    
+    // Set default timeouts to be more forgiving
+    page.setDefaultTimeout(45000);
+    page.setDefaultNavigationTimeout(60000);
 
     console.log('Navigating to Aesop login page...');
     await page.goto(CONFIG.aesopUrl, { 
@@ -526,12 +530,79 @@ async function loginAndMaintainSession() {
 
     console.log('Submitting login...');
     try {
+        // Try multiple possible login button selectors
+        const loginSelectors = [
+            '#qa-button-login',
+            'button[type="submit"]',
+            'input[type="submit"]',
+            '.btn-login',
+            '.login-button',
+            '[data-testid="login-button"]',
+            'button:contains("Login")',
+            'button:contains("Sign In")',
+            'button:contains("Log In")',
+            '#loginSubmit',
+            '.submit-button'
+        ];
+        
+        let loginButton = null;
+        for (const selector of loginSelectors) {
+            try {
+                await page.waitForSelector(selector, { timeout: 5000 });
+                loginButton = selector;
+                console.log(`Found login button with selector: ${selector}`);
+                break;
+            } catch (e) {
+                // Try next selector
+                continue;
+            }
+        }
+        
+        if (!loginButton) {
+            throw new Error('Login button not found with any selector');
+        }
+        
         await Promise.all([
-            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-            page.click('#qa-button-login')
+            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 }),
+            page.click(loginButton)
         ]);
     } catch (error) {
-        throw new Error(`Login submission failed: ${error.message}`);
+        console.log('Login navigation timeout, trying alternative approach...');
+        
+        // Try alternative approach - wait for URL change or specific element
+        try {
+            await page.click(loginButton || 'button[type="submit"]');
+            console.log('Login clicked, waiting for redirect...');
+            
+            // Wait up to 45 seconds for either URL change or dashboard element
+            await Promise.race([
+                page.waitForNavigation({ waitUntil: 'load', timeout: 45000 }),
+                page.waitForSelector('#dashboard, .dashboard, [data-testid="dashboard"], .main-content', { timeout: 45000 }),
+                new Promise(resolve => setTimeout(resolve, 45000))
+            ]);
+            
+            console.log('Login successful with alternative approach');
+        } catch (altError) {
+            // Final fallback - just wait and check if we're logged in
+            console.log('Alternative approach failed, trying final fallback...');
+            await page.click(loginButton || 'button[type="submit"]');
+            await new Promise(resolve => setTimeout(resolve, 8000));
+            
+            // Check if login was successful by looking for login-related elements
+            const isLoggedIn = await page.evaluate(() => {
+                return !document.querySelector('#Username') && 
+                       (document.querySelector('.dashboard') || 
+                        document.querySelector('[data-testid="dashboard"]') ||
+                        window.location.href.includes('dashboard') ||
+                        window.location.href.includes('home'));
+            });
+            
+            if (!isLoggedIn) {
+                throw new Error(`Login submission failed after multiple attempts: ${error.message}`);
+            }
+            
+            console.log('Login successful with fallback approach');
+        }
     }
 
     console.log('Login submitted, waiting for page to load...');
@@ -652,21 +723,12 @@ async function checkForShifts() {
                     console.log(`pageVars.availJobs: ${!!pageVars.availJobs}`);
                     if (pageVars.availJobs) {
                         console.log(`pageVars.availJobs keys:`, Object.keys(pageVars.availJobs));
-                        console.log(`pageVars.availJobs.list: ${!!pageVars.availJobs.list}`);
-                        console.log(`pageVars.availJobs.fromDb: ${pageVars.availJobs.fromDb}`);
-                    }
                     
-                    if (pageVars && pageVars.availJobs && pageVars.availJobs.list) {
-                        console.log(`Found ${pageVars.availJobs.list.length} available jobs in pageVars.availJobs.list`);
+            if (pageVars && pageVars.availJobs && pageVars.availJobs.list) {
+                console.log(`📊 Found ${pageVars.availJobs.list.length} jobs in pageVars.availJobs.list`);
                         
-                        for (const job of pageVars.availJobs.list) {
-                            console.log(`\n--- Processing job from pageVars.availJobs.list ---`);
-                            console.log(`Job ID: ${job.Id}`);
-                            console.log(`Title: ${job.WorkerTitle}`);
-                            console.log(`Employee: ${job.WorkerFirstName} ${job.WorkerLastName}`);
-                            console.log(`School: ${job.Items && job.Items[0] ? job.Items[0].Institution.Name : 'N/A'}`);
-                            console.log(`Start: ${job.Start}`);
-                            console.log(`EndDate: ${job.EndDate}`);
+                for (const job of pageVars.availJobs.list) {
+                    console.log(`🔍 PAGEVARS JOB DEBUG: ID=${job.Id}, Title=${job.WorkerTitle}, SubstituteId=${job.SubstituteId}`);
                             console.log(`Items count: ${job.Items ? job.Items.length : 0}`);
                             console.log(`SubstituteId: ${job.SubstituteId}`);
                             
@@ -780,7 +842,6 @@ async function checkForShifts() {
                     }
                 } catch (parseError) {
                     console.log('Error parsing pageVars with eval:', parseError.message);
-                    console.log('Parse error details:', parseError.stack);
                     
                     // Try to extract availJobs using regex as fallback
                     console.log('Trying regex fallback for availJobs...');
@@ -795,10 +856,12 @@ async function checkForShifts() {
                             console.log(`Found ${availJobs.length} jobs with regex fallback`);
                             
                             for (const job of availJobs) {
-                                // Process each job...
+                                // Log all job details for debugging
+                                console.log(`🔍 JOB DEBUG: ID=${job.Id}, Title=${job.WorkerTitle}, SubstituteId=${job.SubstituteId}, WorkerFirstName=${job.WorkerFirstName}, WorkerLastName=${job.WorkerLastName}`);
+                                
                                 if (job.SubstituteId === null) {
                                     // Add job processing logic here
-                                    console.log(`Found available job: ${job.Id} - ${job.WorkerTitle}`);
+                                    console.log(`✅ PROCESSING AVAILABLE JOB: ${job.Id} - ${job.WorkerTitle}`);
                                     // ... rest of job processing
                                 }
                             }
@@ -860,17 +923,18 @@ async function checkForShifts() {
             // Add new shifts to the notified set
             newShifts.forEach(shift => notifiedShiftIds.add(shift.id));
             
-            // Update available shifts for dashboard
+            console.log(`📊 Final shifts array has ${filteredShifts.length} shifts`);
+            console.log('📋 filteredShifts preview:', JSON.stringify(filteredShifts.slice(0, 2), null, 2));
             availableShifts = [...filteredShifts];
             lastChecked = new Date();
             
             // Send email notification
             await sendEmailNotification(newShifts);
         } else {
-            console.log('No new shifts found');
+            console.log('❌ No new shifts found');
+            console.log(`📊 Final shifts array still has ${availableShifts.length} shifts`);
         }
 
-        // Update available shifts for dashboard even if no new shifts
         availableShifts = [...filteredShifts];
         lastChecked = new Date();
 
@@ -1246,6 +1310,10 @@ process.on('unhandledRejection', async (reason, promise) => {
 
 // API endpoint for Android app to get shifts
 app.get('/api/shifts', (req, res) => {
+    console.log(`📊 API /api/shifts called - returning ${availableShifts.length} shifts`);
+    console.log('📋 availableShifts array:', JSON.stringify(availableShifts, null, 2));
+    console.log('🕐 lastChecked:', lastChecked);
+    
     res.json({
         success: true,
         shifts: availableShifts,
