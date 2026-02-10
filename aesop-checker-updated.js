@@ -571,6 +571,9 @@ async function checkForShifts() {
     
     let error = null; // Track if there was an error
 
+    // Periodic Chrome cleanup to prevent orphaned processes
+    await cleanupChromeProcesses();
+
     // Validate required configuration
     if (!CONFIG.username || !CONFIG.password) {
         throw new Error('Missing AESOP_USERNAME or AESOP_PASSWORD in environment variables');
@@ -1145,9 +1148,41 @@ async function sendErrorNotification(error, context = "Unknown") {
     }
 }
 
+// Periodic Chrome cleanup to prevent orphaned processes
+async function cleanupChromeProcesses() {
+    try {
+        const { exec } = require('child_process');
+        
+        // Check for Chrome processes
+        exec('pgrep -f chrome | wc -l', (error, stdout, stderr) => {
+            if (!error) {
+                const chromeProcessCount = parseInt(stdout.trim());
+                console.log(`🔍 Found ${chromeProcessCount} Chrome processes`);
+                
+                if (chromeProcessCount > 5) { // If more than 5 Chrome processes, clean up
+                    console.log('🧹 Too many Chrome processes detected, cleaning up...');
+                    
+                    exec('pkill -f chrome || true', (killError, killStdout, killStderr) => {
+                        if (killError) {
+                            console.log('Chrome cleanup error:', killError.message);
+                        } else {
+                            console.log('✅ Cleaned up orphaned Chrome processes');
+                        }
+                    });
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.log('Chrome process check failed:', error.message);
+    }
+}
+
 // Cleanup function for graceful shutdown
 async function cleanup() {
     console.log('Cleaning up...');
+    
+    // Close our browser instance
     if (browser) {
         try {
             await browser.close();
@@ -1160,6 +1195,28 @@ async function cleanup() {
     page = null;
     sessionCookies = null;
     lastLoginTime = null;
+    
+    // Kill any orphaned Chrome processes (Linux/Unix)
+    try {
+        const { exec } = require('child_process');
+        exec('pkill -f chrome || true', (error, stdout, stderr) => {
+            if (error) {
+                console.log('No Chrome processes to kill or error killing Chrome:', error.message);
+            } else {
+                console.log('🧹 Cleaned up orphaned Chrome processes');
+            }
+        });
+        
+        // Also try with chrome-browser variant
+        exec('pkill -f chrome-browser || true', (error, stdout, stderr) => {
+            if (error && error.code !== 1) {
+                console.log('No chrome-browser processes to kill:', error.message);
+            }
+        });
+        
+    } catch (error) {
+        console.log('Error in Chrome process cleanup:', error.message);
+    }
 }
 
 // Handle graceful shutdown
@@ -1341,9 +1398,25 @@ app.listen(PORT, async () => {
     await testEmailConfiguration();
     console.log('================================\n');
     
-    // Initial check
-    checkForShifts();
+    // Set up periodic Chrome cleanup (every 30 minutes)
+    setInterval(async () => {
+        console.log('🧹 Running periodic Chrome cleanup...');
+        await cleanupChromeProcesses();
+    }, 30 * 60 * 1000); // 30 minutes
     
-    // Set up periodic checking
-    setInterval(checkForShifts, CONFIG.checkInterval);
+    // Initial Chrome cleanup on startup
+    console.log('🧹 Running initial Chrome cleanup...');
+    await cleanupChromeProcesses();
+    
+    // Start the job checking interval
+    setInterval(async () => {
+        try {
+            await checkForShifts();
+        } catch (error) {
+            console.error('Error in scheduled job check:', error);
+        }
+    }, CONFIG.checkInterval);
+    
+    // Run initial check
+    await checkForShifts();
 });
