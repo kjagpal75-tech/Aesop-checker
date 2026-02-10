@@ -842,6 +842,7 @@ async function checkForShifts() {
                             } else {
                                 console.log(`❌ SKIPPING JOB - Already has substitute assigned: ${job.SubstituteId}`);
                             }
+                            }
                         }
                     } else {
                         console.log('No availJobs.list found in pageVars');
