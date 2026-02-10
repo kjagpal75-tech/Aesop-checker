@@ -15,6 +15,15 @@ let sessionCookies = null;
 let lastLoginTime = null;
 let isChecking = false;
 
+// Real-time monitoring variables
+let realTimeBrowser = null;
+let realTimePage = null;
+let realTimeInterval = null;
+let lastKnownJobs = new Set();
+
+// Job acceptance tracking
+let jobAcceptanceStatus = new Map(); // Track acceptance attempts
+
 // Email transporter setup - OAuth2 only for Outlook
 let transporter;
 
@@ -94,6 +103,13 @@ app.get('/accept/:jobId', async (req, res) => {
     console.log(`Received EMAIL MAGIC LINK request to accept job: ${jobId}`);
     
     try {
+        // Initialize status tracking
+        jobAcceptanceStatus.set(jobId, { 
+            status: 'processing', 
+            startTime: Date.now(),
+            message: 'Initializing...'
+        });
+        
         // Show a loading page while processing
         res.send(`
             <!DOCTYPE html>
@@ -111,46 +127,89 @@ app.get('/accept/:jobId', async (req, res) => {
                         <h1 class="text-2xl font-bold text-gray-800 mb-2">Accepting Job...</h1>
                         <p class="text-gray-600 mb-4">Please wait while we accept your substitute position in Aesop...</p>
                         <div id="status" class="text-sm text-gray-500">Initializing...</div>
+                        <div id="progress" class="w-full bg-gray-200 rounded-full h-2 mt-4">
+                            <div id="progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+                        </div>
                     </div>
                 </div>
                 
                 <script>
                     const statusEl = document.getElementById('status');
-                    statusEl.textContent = 'Connecting to Aesop...';
+                    const progressBar = document.getElementById('progress-bar');
+                    let attempts = 0;
+                    const maxAttempts = 30; // 30 attempts = 60 seconds max
                     
-                    // Poll for completion status
-                    setTimeout(() => {
-                        statusEl.textContent = 'Logging in and finding job...';
-                    }, 2000);
+                    function updateStatus(status, progress) {
+                        statusEl.textContent = status;
+                        progressBar.style.width = progress + '%';
+                    }
                     
-                    setTimeout(() => {
-                        statusEl.textContent = 'Accepting position...';
-                    }, 4000);
-                    
-                    setTimeout(() => {
-                        // Check final status
+                    function checkStatus() {
+                        attempts++;
+                        
+                        if (attempts === 1) updateStatus('Connecting to Aesop...', 20);
+                        if (attempts === 3) updateStatus('Logging in and finding job...', 40);
+                        if (attempts === 6) updateStatus('Accepting position...', 60);
+                        if (attempts === 12) updateStatus('Confirming acceptance...', 80);
+                        
                         fetch('/api/accept-job-status/${jobId}')
                             .then(response => response.json())
                             .then(data => {
                                 if (data.success) {
-                                    window.location.href = '/accept-success/${jobId}';
+                                    updateStatus('Job accepted successfully!', 100);
+                                    setTimeout(() => {
+                                        window.location.href = '/accept-success/${jobId}';
+                                    }, 1000);
+                                } else if (data.status === 'failed') {
+                                    updateStatus('Acceptance failed', 0);
+                                    setTimeout(() => {
+                                        window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent(data.message || 'Unknown error');
+                                    }, 1000);
+                                } else if (attempts >= maxAttempts) {
+                                    updateStatus('Taking longer than expected...', 90);
+                                    setTimeout(() => {
+                                        window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent('Acceptance timed out. Please check manually in Aesop.');
+                                    }, 2000);
                                 } else {
-                                    window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent(data.message);
+                                    // Continue polling
+                                    setTimeout(checkStatus, 2000);
                                 }
                             })
-                            .catch(() => {
-                                window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent('Unable to check status'));
+                            .catch(error => {
+                                console.error('Status check error:', error);
+                                if (attempts >= maxAttempts) {
+                                    window.location.href = '/accept-error/${jobId}?message=' + encodeURIComponent('Unable to check status after multiple attempts');
+                                } else {
+                                    setTimeout(checkStatus, 2000);
+                                }
                             });
-                    }, 6000);
+                    }
+                    
+                    // Start status checking
+                    setTimeout(checkStatus, 1000);
                 </script>
             </body>
             </html>
         `);
         
         // Process the job acceptance in the background
-        acceptJob(jobId).catch(error => {
-            console.error('Background job acceptance failed:', error);
-        });
+        acceptJob(jobId)
+            .then(result => {
+                console.log(`Job ${jobId} acceptance result:`, result);
+                jobAcceptanceStatus.set(jobId, { 
+                    status: result.success ? 'success' : 'failed',
+                    message: result.message,
+                    completed: true
+                });
+            })
+            .catch(error => {
+                console.error('Background job acceptance failed:', error);
+                jobAcceptanceStatus.set(jobId, { 
+                    status: 'failed',
+                    message: error.message,
+                    completed: true
+                });
+            });
         
     } catch (error) {
         console.error('Error setting up magic link acceptance:', error);
@@ -171,9 +230,32 @@ app.get('/accept/:jobId', async (req, res) => {
 // Job acceptance status endpoint
 app.get('/api/accept-job-status/:jobId', async (req, res) => {
     const jobId = req.params.jobId;
-    // For now, we'll just check if the job was recently processed
-    // In a real implementation, you'd track acceptance status in a database
-    res.json({ success: true, message: 'Job acceptance processed' });
+    const status = jobAcceptanceStatus.get(jobId);
+    
+    if (!status) {
+        return res.json({ success: false, status: 'not_found', message: 'Job acceptance not found' });
+    }
+    
+    if (status.completed) {
+        return res.json({
+            success: status.status === 'success',
+            status: status.status,
+            message: status.message
+        });
+    }
+    
+    // Still processing
+    const elapsed = Date.now() - status.startTime;
+    if (elapsed > 60000) { // 1 minute timeout
+        jobAcceptanceStatus.set(jobId, { 
+            ...status,
+            status: 'failed',
+            message: 'Acceptance timed out after 1 minute'
+        });
+        return res.json({ success: false, status: 'failed', message: 'Acceptance timed out' });
+    }
+    
+    res.json({ success: false, status: 'processing', message: status.message });
 });
 
 // Accept success page
