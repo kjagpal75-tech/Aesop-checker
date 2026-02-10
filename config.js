@@ -23,6 +23,12 @@ module.exports = {
     realTimeMode: process.env.REAL_TIME_MODE === 'true', // Instant notifications (keeps browser open)
     realTimeInterval: parseInt(process.env.REAL_TIME_INTERVAL) || 30 * 1000, // 30 seconds for real-time checks
     publicUrl: process.env.PUBLIC_URL || 'http://localhost:3000', // Public URL for email links and API calls
+    
+    // Auto-Accept Settings
+    autoAcceptEnabled: process.env.AUTO_ACCEPT_ENABLED === 'true', // Enable/disable auto-accept
+    autoAcceptHoursInFuture: parseInt(process.env.AUTO_ACCEPT_HOURS_IN_FUTURE) || 48, // Auto-accept jobs X+ hours in future
+    autoAcceptLogOnly: process.env.AUTO_ACCEPT_LOG_ONLY === 'true', // Log only mode (don't actually accept)
+    
     position: process.env.POSITION || 'Substitute Teacher',
     district: process.env.DISTRICT || 'Fremont Unified School District'
 };

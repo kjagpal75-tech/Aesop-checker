@@ -729,6 +729,43 @@ async function checkForShifts() {
                                     foundAt: new Date().toISOString()
                                 };
                                 
+                                // Auto-Accept Logic: Check if job is 48+ hours in future
+                                if (CONFIG.autoAcceptEnabled) {
+                                    const jobStartTime = job.Items && job.Items[0] ? new Date(job.Items[0].Start) : new Date(job.Start);
+                                    const currentTime = new Date();
+                                    const hoursInFuture = (jobStartTime - currentTime) / (1000 * 60 * 60);
+                                    
+                                    console.log(`🕐 Job ${job.Id} is ${hoursInFuture.toFixed(1)} hours in the future`);
+                                    
+                                    if (hoursInFuture >= CONFIG.autoAcceptHoursInFuture) {
+                                        console.log(`🎯 AUTO-ACCEPT QUALIFIED: Job ${job.Id} is ${hoursInFuture.toFixed(1)} hours in future (>= ${CONFIG.autoAcceptHoursInFuture}h)`);
+                                        
+                                        if (CONFIG.autoAcceptLogOnly) {
+                                            console.log(`📝 LOG ONLY MODE: Would auto-accept job ${job.Id} - ${job.WorkerTitle} at ${shiftData.school}`);
+                                        } else {
+                                            console.log(`🚀 AUTO-ACCEPTING: Job ${job.Id} - ${job.WorkerTitle} at ${shiftData.school}`);
+                                            
+                                            // Auto-accept the job in the background
+                                            acceptJob(job.Id)
+                                                .then(result => {
+                                                    if (result.success) {
+                                                        console.log(`✅ AUTO-ACCEPT SUCCESS: Job ${job.Id} accepted automatically!`);
+                                                        
+                                                        // Send special auto-accept notification
+                                                        sendAutoAcceptNotification(shiftData, hoursInFuture);
+                                                    } else {
+                                                        console.log(`❌ AUTO-ACCEPT FAILED: Job ${job.Id} - ${result.message}`);
+                                                    }
+                                                })
+                                                .catch(error => {
+                                                    console.error(`💥 AUTO-ACCEPT ERROR: Job ${job.Id} - ${error.message}`);
+                                                });
+                                        }
+                                    } else {
+                                        console.log(`⏰ NOT AUTO-ACCEPTING: Job ${job.Id} is only ${hoursInFuture.toFixed(1)} hours in future (< ${CONFIG.autoAcceptHoursInFuture}h)`);
+                                    }
+                                }
+                                
                                 console.log(`✅ ADDING JOB: ${job.WorkerTitle} at ${shiftData.school}`);
                                 shifts.push(shiftData);
                             } else {
@@ -891,6 +928,75 @@ async function testEmailConfiguration() {
     } catch (error) {
         console.error('Email configuration test failed:', error.message);
         return false;
+    }
+}
+
+// Send special auto-accept notification
+async function sendAutoAcceptNotification(shift, hoursInFuture) {
+    if (!transporter) {
+        console.log('Email transporter not configured - skipping auto-accept notification');
+        return;
+    }
+
+    const mailOptions = {
+        from: CONFIG.emailFrom,
+        to: CONFIG.emailTo,
+        subject: `🚀 AUTO-ACCEPTED: ${shift.title} at ${shift.school}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff;">
+                <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 30px; text-align: center; border-radius: 10px 10px 0 0;">
+                    <h1 style="margin: 0; font-size: 28px;">🚀 Job Auto-Accepted!</h1>
+                    <p style="margin: 10px 0 0 0; font-size: 18px; opacity: 0.9;">We automatically accepted this substitute position for you</p>
+                </div>
+                
+                <div style="padding: 30px; background-color: #f8f9fa;">
+                    <div style="background-color: white; padding: 25px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);">
+                        <h2 style="color: #333; margin: 0 0 20px 0; font-size: 22px;">🎯 Auto-Accepted Position</h2>
+                        
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+                            <div>
+                                <p style="margin: 5px 0;"><strong style="color: #667eea;">👤 Teacher:</strong> ${shift.employee}</p>
+                                <p style="margin: 5px 0;"><strong style="color: #667eea;">🏫 School:</strong> ${shift.school}</p>
+                            </div>
+                            <div>
+                                <p style="margin: 5px 0;"><strong style="color: #667eea;">📅 Date:</strong> ${shift.date}</p>
+                                <p style="margin: 5px 0;"><strong style="color: #667eea;">🕐 Time:</strong> ${shift.time}</p>
+                            </div>
+                        </div>
+                        
+                        <div style="background-color: #e8f5e8; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #28a745;">
+                            <p style="margin: 0; color: #155724; font-weight: bold;">⏰ Auto-Accept Reason:</p>
+                            <p style="margin: 5px 0 0 0; color: #155724;">Job was ${hoursInFuture.toFixed(1)} hours in the future (≥ ${CONFIG.autoAcceptHoursInFuture} hours)</p>
+                        </div>
+                        
+                        <div style="text-align: center; margin-top: 25px;">
+                            <a href="${CONFIG.aesopUrl}" 
+                               target="_blank"
+                               style="background-color: #28a745; color: white; padding: 15px 30px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; display: inline-block;">
+                                🔍 View in Aesop
+                            </a>
+                        </div>
+                        
+                        <p style="margin: 20px 0 0 0; font-size: 14px; color: #666; text-align: center; font-style: italic;">
+                            💡 This job was automatically accepted because it meets your 48+ hour advance notice criteria
+                        </p>
+                    </div>
+                </div>
+                
+                <div style="background-color: #f8f9fa; padding: 20px; text-align: center; border-radius: 0 0 10px 10px; border-top: 1px solid #e9ecef;">
+                    <p style="margin: 0; color: #666; font-size: 12px;">
+                        🚀 Auto-accepted at ${new Date().toLocaleString()} | Aesop Shift Checker
+                    </p>
+                </div>
+            </div>
+        `
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log('✅ Auto-accept notification sent successfully');
+    } catch (error) {
+        console.error('❌ Error sending auto-accept notification:', error);
     }
 }
 
