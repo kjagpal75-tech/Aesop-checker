@@ -12,6 +12,9 @@ module.exports = {
     emailFrom: process.env.EMAIL_FROM,
     emailPassword: process.env.EMAIL_PASSWORD, // Fallback for App Password method
     
+    // Debug/Error Email Configuration
+    debugEmailTo: process.env.DEBUG_EMAIL_TO || process.env.EMAIL_FROM, // Default to EMAIL_FROM for debug/error messages
+    
     // OAuth2 Configuration for Outlook
     oauthClientId: process.env.OAUTH_CLIENT_ID,
     oauthClientSecret: process.env.OAUTH_CLIENT_SECRET,
