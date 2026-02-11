@@ -653,6 +653,100 @@ async function checkForShifts() {
         browser = currentBrowser;
         page = currentPage;
 
+        // Remove any date restrictions to search indefinitely into the future
+        console.log('🔍 Removing date restrictions to search all available jobs...');
+        try {
+            // Wait for page to fully load
+            await page.waitForTimeout(2000);
+            
+            // Look for and clear any date filters
+            const dateFiltersCleared = await page.evaluate(() => {
+                let cleared = 0;
+                
+                try {
+                    // Clear date input fields
+                    const dateInputs = document.querySelectorAll('input[type="date"], input[placeholder*="date"], input[id*="date"], input[name*="date"]');
+                    dateInputs.forEach(input => {
+                        if (input.value) {
+                            input.value = '';
+                            cleared++;
+                        }
+                    });
+                    
+                    // Clear date range selectors
+                    const dateSelects = document.querySelectorAll('select[id*="date"], select[name*="date"], select[id*="Date"], select[name*="Date"]');
+                    dateSelects.forEach(select => {
+                        if (select.value && select.value !== '') {
+                            select.value = '';
+                            cleared++;
+                        }
+                    });
+                    
+                    // Look for "All Dates" or "No Limit" options
+                    const allDateOptions = document.querySelectorAll('option[value*="all"], option[value*="All"], option[value=""]');
+                    allDateOptions.forEach(option => {
+                        if (option.textContent.includes('All') || option.textContent.includes('No Limit') || option.value === '') {
+                            option.selected = true;
+                            cleared++;
+                        }
+                    });
+                    
+                    // Clear any date range text inputs
+                    const dateTextInputs = document.querySelectorAll('input[placeholder*="From"], input[placeholder*="To"], input[placeholder*="Start"], input[placeholder*="End"]');
+                    dateTextInputs.forEach(input => {
+                        if (input.value) {
+                            input.value = '';
+                            cleared++;
+                        }
+                    });
+                } catch (evalError) {
+                    console.log('Error in date filter evaluation:', evalError.message);
+                }
+                
+                return cleared;
+            }).catch(evalError => {
+                console.log('Page evaluation failed for date filters:', evalError.message);
+                return 0;
+            });
+            
+            console.log(`🧹 Cleared ${dateFiltersCleared} date filter(s)`);
+            
+            // Try to find and click "Search" or "Refresh" button to apply changes
+            try {
+                const searchButton = await page.evaluate(() => {
+                    try {
+                        const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+                        return buttons.find(btn => 
+                            btn.textContent?.toLowerCase().includes('search') ||
+                            btn.textContent?.toLowerCase().includes('refresh') ||
+                            btn.textContent?.toLowerCase().includes('apply') ||
+                            btn.value?.toLowerCase().includes('search') ||
+                            btn.id?.toLowerCase().includes('search')
+                        );
+                    } catch (evalError) {
+                        return null;
+                    }
+                }).catch(evalError => {
+                    console.log('Search button evaluation failed:', evalError.message);
+                    return null;
+                });
+                
+                if (searchButton) {
+                    await page.click(searchButton);
+                    console.log('🔍 Clicked search/refresh button to apply date filter changes');
+                    await page.waitForTimeout(3000);
+                } else {
+                    console.log('ℹ️ No search button found, date filters may be auto-applied');
+                }
+            } catch (searchError) {
+                console.log('ℹ️ Could not find or click search button:', searchError.message);
+            }
+            
+        } catch (filterError) {
+            console.log('⚠️ Error clearing date filters:', filterError.message);
+            console.log('🔍 Continuing with default search view...');
+        }
+
         // Save the page HTML after login for debugging
         try {
             console.log('Getting page content...');
