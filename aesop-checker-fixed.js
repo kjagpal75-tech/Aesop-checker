@@ -341,33 +341,63 @@ async function acceptJob(jobId) {
     
     let browser;
     let retryCount = 0;
-    const maxRetries = 2;
+    const maxRetries = 3; // Increased from 2 to 3
+    const retryDelay = 3000; // 3 seconds between retries
     
     while (retryCount < maxRetries) {
         try {
+            console.log(`🔄 Accept job attempt ${retryCount + 1}/${maxRetries} for job ${jobId}`);
+            
             browser = await puppeteer.launch({
                 headless: 'new',
-                args: ['--no-sandbox', '--disable-setuid-sandbox']
+                args: [
+                    '--no-sandbox', 
+                    '--disable-setuid-sandbox',
+                    '--disable-dev-shm-usage', // Prevent shared memory issues
+                    '--disable-gpu', // Disable GPU acceleration
+                    '--no-first-run', // Skip first run setup
+                    '--no-default-browser-check', // Skip default browser check
+                    '--disable-background-timer-throttling', // Prevent timer throttling
+                    '--disable-renderer-backgrounding', // Prevent renderer backgrounding
+                    '--disable-backgrounding-occluded-windows' // Prevent window backgrounding
+                ]
             });
 
             const page = await browser.newPage();
             await page.setViewport({ width: 1280, height: 800 });
             
-            // Set error handling for frame detachment
+            // Set up error handling for page crashes
             page.on('error', (error) => {
-                console.log('Page error detected:', error.message);
+                console.log('🚨 Page error detected:', error.message);
             });
             
             page.on('pageerror', (error) => {
-                console.log('Page error detected:', error.message);
+                console.log('🚨 Page error detected:', error.message);
+            });
+            
+            page.on('framedetached', (frame) => {
+                console.log('🚨 Frame detached:', frame.url());
+            });
+            
+            page.on('framenavigated', (frame) => {
+                console.log('🔄 Frame navigated:', frame.url());
             });
 
-            // Login to Aesop
+            // Login to Aesop with increased timeout
             console.log('Logging in to accept job...');
-            await page.goto(CONFIG.aesopUrl, { 
-                waitUntil: 'networkidle2', 
-                timeout: 60000 
-            });
+            try {
+                await page.goto(CONFIG.aesopUrl, { 
+                    waitUntil: 'networkidle2', 
+                    timeout: 90000 // Increased from 60s to 90s
+                });
+            } catch (navError) {
+                if (navError.message.includes('Navigation timeout') || 
+                    navError.message.includes('Target closed') ||
+                    navError.message.includes('frame was detached')) {
+                    throw new Error(`Frame detachment during login: ${navError.message}`);
+                }
+                throw navError;
+            }
 
         await page.waitForSelector('#Username', { timeout: 10000 });
         await page.waitForSelector('#Password', { timeout: 10000 });
@@ -437,6 +467,7 @@ async function acceptJob(jobId) {
         }
 
     } catch (error) {
+        // Clean up browser on error
         if (browser) {
             try {
                 await browser.close();
@@ -445,28 +476,39 @@ async function acceptJob(jobId) {
             }
         }
         
-        // Check for frame detachment error and retry
-        if (error.message.includes('Navigating frame was detached') || 
-            error.message.includes('Target closed') ||
-            error.message.includes('Session closed') ||
-            error.message.includes('Protocol error')) {
-            
+        // Check for frame detachment and related errors that should trigger retry
+        const frameDetachmentErrors = [
+            'Navigating frame was detached',
+            'Target closed',
+            'Session closed', 
+            'Protocol error',
+            'Execution context was destroyed',
+            'Frame detached during login',
+            'Navigation timeout',
+            'Target closed'
+        ];
+        
+        const shouldRetry = frameDetachmentErrors.some(err => 
+            error.message.includes(err)
+        );
+        
+        if (shouldRetry) {
             retryCount++;
-            console.log(`🔄 Frame detached error (attempt ${retryCount}/${maxRetries}), retrying...`);
+            console.log(`🔄 Frame detachment error detected (attempt ${retryCount}/${maxRetries}): ${error.message}`);
             
             if (retryCount < maxRetries) {
-                // Wait a bit before retrying
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                console.log(`⏱️ Waiting ${retryDelay/1000} seconds before retry...`);
+                await new Promise(resolve => setTimeout(resolve, retryDelay));
                 continue; // Retry the while loop
             } else {
                 return {
                     success: false,
-                    message: `Failed to accept job ${jobId} after ${maxRetries} attempts due to browser instability: ${error.message}`
+                    message: `Failed to accept job ${jobId} after ${maxRetries} attempts due to browser instability. Last error: ${error.message}`
                 };
             }
         }
         
-        // For other errors, don't retry
+        // For other errors (not frame detachment), don't retry
         return {
             success: false,
             message: `Failed to accept job ${jobId}: ${error.message}`
@@ -476,7 +518,7 @@ async function acceptJob(jobId) {
     // This should never be reached, but just in case
     return {
         success: false,
-        message: `Failed to accept job ${jobId}: Unknown error`
+        message: `Failed to accept job ${jobId}: Unknown error occurred`
     };
 }
 
@@ -701,6 +743,100 @@ async function checkForShifts() {
         // Update global variables
         browser = currentBrowser;
         page = currentPage;
+
+        // Remove any date restrictions to search indefinitely into the future
+        console.log('🔍 Removing date restrictions to search all available jobs...');
+        try {
+            // Wait for page to fully load
+            await page.waitForTimeout(2000);
+            
+            // Look for and clear any date filters
+            const dateFiltersCleared = await page.evaluate(() => {
+                let cleared = 0;
+                
+                try {
+                    // Clear date input fields
+                    const dateInputs = document.querySelectorAll('input[type="date"], input[placeholder*="date"], input[id*="date"], input[name*="date"]');
+                    dateInputs.forEach(input => {
+                        if (input.value) {
+                            input.value = '';
+                            cleared++;
+                        }
+                    });
+                    
+                    // Clear date range selectors
+                    const dateSelects = document.querySelectorAll('select[id*="date"], select[name*="date"], select[id*="Date"], select[name*="Date"]');
+                    dateSelects.forEach(select => {
+                        if (select.value && select.value !== '') {
+                            select.value = '';
+                            cleared++;
+                        }
+                    });
+                    
+                    // Look for "All Dates" or "No Limit" options
+                    const allDateOptions = document.querySelectorAll('option[value*="all"], option[value*="All"], option[value=""]');
+                    allDateOptions.forEach(option => {
+                        if (option.textContent.includes('All') || option.textContent.includes('No Limit') || option.value === '') {
+                            option.selected = true;
+                            cleared++;
+                        }
+                    });
+                    
+                    // Clear any date range text inputs
+                    const dateTextInputs = document.querySelectorAll('input[placeholder*="From"], input[placeholder*="To"], input[placeholder*="Start"], input[placeholder*="End"]');
+                    dateTextInputs.forEach(input => {
+                        if (input.value) {
+                            input.value = '';
+                            cleared++;
+                        }
+                    });
+                } catch (evalError) {
+                    console.log('Error in date filter evaluation:', evalError.message);
+                }
+                
+                return cleared;
+            }).catch(evalError => {
+                console.log('Page evaluation failed for date filters:', evalError.message);
+                return 0;
+            });
+            
+            console.log(`🧹 Cleared ${dateFiltersCleared} date filter(s)`);
+            
+            // Try to find and click "Search" or "Refresh" button to apply changes
+            try {
+                const searchButton = await page.evaluate(() => {
+                    try {
+                        const buttons = Array.from(document.querySelectorAll('button, input[type="button"], input[type="submit"]'));
+                        return buttons.find(btn => 
+                            btn.textContent?.toLowerCase().includes('search') ||
+                            btn.textContent?.toLowerCase().includes('refresh') ||
+                            btn.textContent?.toLowerCase().includes('apply') ||
+                            btn.value?.toLowerCase().includes('search') ||
+                            btn.id?.toLowerCase().includes('search')
+                        );
+                    } catch (evalError) {
+                        return null;
+                    }
+                }).catch(evalError => {
+                    console.log('Search button evaluation failed:', evalError.message);
+                    return null;
+                });
+                
+                if (searchButton) {
+                    await page.click(searchButton);
+                    console.log('🔍 Clicked search/refresh button to apply date filter changes');
+                    await page.waitForTimeout(3000);
+                } else {
+                    console.log('ℹ️ No search button found, date filters may be auto-applied');
+                }
+            } catch (searchError) {
+                console.log('ℹ️ Could not find or click search button:', searchError.message);
+            }
+            
+        } catch (filterError) {
+            console.log('⚠️ Error clearing date filters:', filterError.message);
+            console.log('🔍 Continuing with default search view...');
+        }
 
         // Save the page HTML after login for debugging
         try {
