@@ -657,7 +657,7 @@ async function checkForShifts() {
         console.log('🔍 Removing date restrictions to search all available jobs...');
         try {
             // Wait for page to fully load
-            await page.waitForTimeout(2000);
+            await new Promise(resolve => setTimeout(resolve, 2000));
             
             // Look for and clear any date filters
             const dateFiltersCleared = await page.evaluate(() => {
@@ -734,7 +734,7 @@ async function checkForShifts() {
                 if (searchButton) {
                     await page.click(searchButton);
                     console.log('🔍 Clicked search/refresh button to apply date filter changes');
-                    await page.waitForTimeout(3000);
+                    await new Promise(resolve => setTimeout(resolve, 3000));
                 } else {
                     console.log('ℹ️ No search button found, date filters may be auto-applied');
                 }
