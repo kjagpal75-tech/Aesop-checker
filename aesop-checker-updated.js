@@ -1827,44 +1827,122 @@ app.get('/health/detailed', (req, res) => {
     res.json(health);
 });
 
-// Enhanced cleanup for orphaned browser sessions
+// Enhanced cleanup for orphaned browser sessions (safe for active sessions)
 async function cleanupOrphanedBrowsers() {
     try {
-        console.log('🔍 Scanning for orphaned browser sessions...');
+        console.log('🔍 Scanning for orphaned browser sessions (protecting active sessions)...');
         
         // Get all Chrome processes
         const { exec } = require('child_process');
         const util = require('util');
         const execPromise = util.promisify(exec);
         
+        // First, identify our active browser processes
+        const activePids = new Set();
+        
+        // Check main browser
+        if (browser && browser.isConnected()) {
+            try {
+                const browserProcess = browser.process();
+                if (browserProcess && browserProcess.pid) {
+                    activePids.add(browserProcess.pid.toString());
+                    console.log(`🛡️ Protecting active main browser PID: ${browserProcess.pid}`);
+                }
+            } catch (error) {
+                console.log('Could not get main browser PID:', error.message);
+            }
+        }
+        
+        // Check accept job browser
+        if (acceptJobBrowser && acceptJobBrowser.isConnected()) {
+            try {
+                const acceptJobBrowserProcess = acceptJobBrowser.process();
+                if (acceptJobBrowserProcess && acceptJobBrowserProcess.pid) {
+                    activePids.add(acceptJobBrowserProcess.pid.toString());
+                    console.log(`🛡️ Protecting active accept job browser PID: ${acceptJobBrowserProcess.pid}`);
+                }
+            } catch (error) {
+                console.log('Could not get accept job browser PID:', error.message);
+            }
+        }
+        
+        // Check unified browser (if different from main)
+        if (unifiedBrowser && unifiedBrowser.isConnected()) {
+            try {
+                const unifiedBrowserProcess = unifiedBrowser.process();
+                if (unifiedBrowserProcess && unifiedBrowserProcess.pid) {
+                    activePids.add(unifiedBrowserProcess.pid.toString());
+                    console.log(`🛡️ Protecting active unified browser PID: ${unifiedBrowserProcess.pid}`);
+                }
+            } catch (error) {
+                console.log('Could not get unified browser PID:', error.message);
+            }
+        }
+        
         try {
             const { stdout } = await execPromise('ps aux | grep chrome | grep -v grep');
             const chromeProcesses = stdout.trim().split('\n');
             
             if (chromeProcesses.length > 0) {
-                console.log(`🔍 Found ${chromeProcesses.length} Chrome processes`);
+                console.log(`🔍 Found ${chromeProcesses.length} Chrome processes, protecting ${activePids.size} active sessions`);
                 
-                // Check for processes older than 1 hour (3600000 ms)
-                const oneHourAgo = Date.now() - 3600000;
+                // Check for processes older than 2 hours (more conservative)
+                const twoHoursAgo = Date.now() - (2 * 3600000); // 2 hours instead of 1
                 let orphanedCount = 0;
+                let protectedCount = 0;
                 
                 for (const process of chromeProcesses) {
                     const parts = process.trim().split(/\s+/);
                     if (parts.length >= 2) {
                         const pid = parts[1];
+                        
+                        // Skip if this is an active process we're protecting
+                        if (activePids.has(pid)) {
+                            protectedCount++;
+                            continue;
+                        }
+                        
                         try {
                             // Get process start time
                             const { stdout: statOutput } = await execPromise(`ps -o lstart= -p ${pid}`);
                             const startTime = statOutput.trim();
                             
-                            // Check if process is older than 1 hour
+                            // Check if process is older than 2 hours (more conservative)
                             const processAge = Date.now() - new Date(startTime).getTime();
-                            if (processAge > oneHourAgo) {
+                            if (processAge > twoHoursAgo) {
                                 console.log(`🧹 Found orphaned Chrome process ${pid} (age: ${Math.round(processAge/60000)} minutes)`);
                                 
-                                // Kill orphaned process
-                                await execPromise(`kill -9 ${pid}`);
-                                orphanedCount++;
+                                // Additional safety check: ensure process is actually orphaned
+                                // by checking if it's a Chrome subprocess (child process)
+                                try {
+                                    const { stdout: parentOutput } = await execPromise(`ps -o ppid= -p ${pid}`);
+                                    const parentPid = parentOutput.trim();
+                                    
+                                    // Only kill if parent is not Chrome (likely orphaned)
+                                    if (parentPid && parentPid !== '1') {
+                                        const { stdout: parentNameOutput } = await execPromise(`ps -o comm= -p ${parentPid}`);
+                                        const parentName = parentNameOutput.trim();
+                                        
+                                        if (!parentName.includes('chrome')) {
+                                            console.log(`🧹 Killing truly orphaned Chrome process ${pid} (parent: ${parentName} ${parentPid})`);
+                                            await execPromise(`kill -9 ${pid}`);
+                                            orphanedCount++;
+                                        } else {
+                                            console.log(`🛡️ Skipping Chrome subprocess ${pid} (parent is Chrome ${parentPid})`);
+                                        }
+                                    } else {
+                                        console.log(`🧹 Killing orphaned Chrome process ${pid} (no parent or parent is init)`);
+                                        await execPromise(`kill -9 ${pid}`);
+                                        orphanedCount++;
+                                    }
+                                } catch (parentError) {
+                                    // If we can't check parent, be conservative and don't kill
+                                    console.log(`⚠️ Could not verify parent of process ${pid}, skipping cleanup`);
+                                    continue;
+                                }
+                            } else {
+                                // Process is recent, don't kill it
+                                console.log(`🛡️ Keeping recent Chrome process ${pid} (age: ${Math.round(processAge/60000)} minutes)`);
                             }
                         } catch (error) {
                             // Process might have already ended
@@ -1873,17 +1951,19 @@ async function cleanupOrphanedBrowsers() {
                     }
                 }
                 
+                console.log(`🧹 Cleanup summary: Protected ${protectedCount} active sessions, cleaned ${orphanedCount} orphaned processes`);
+                
                 if (orphanedCount > 0) {
-                    console.log(`🧹 Cleaned up ${orphanedCount} orphaned Chrome processes`);
+                    console.log(`🧹 Cleaned up ${orphanedCount} truly orphaned Chrome processes`);
                 } else {
-                    console.log('✅ No orphaned Chrome processes found');
+                    console.log('✅ No orphaned Chrome processes found (all processes are recent or protected)');
                 }
             }
         } catch (error) {
             console.log('Error scanning Chrome processes:', error.message);
         }
         
-        // Also check for orphaned browser instances in our application
+        // Also check for orphaned browser instances in our application (disconnected but not closed)
         if (browser && !browser.isConnected()) {
             console.log('🧹 Cleaning up disconnected main browser');
             try {
@@ -1907,6 +1987,19 @@ async function cleanupOrphanedBrowsers() {
             acceptJobBrowser = null;
             acceptJobPage = null;
             lastAcceptJobTime = null;
+        }
+        
+        if (unifiedBrowser && !unifiedBrowser.isConnected()) {
+            console.log('🧹 Cleaning up disconnected unified browser');
+            try {
+                await unifiedBrowser.close();
+            } catch (error) {
+                console.log('Error closing disconnected unified browser:', error.message);
+            }
+            unifiedBrowser = null;
+            unifiedPage = null;
+            unifiedSessionId = null;
+            lastSessionActivity = null;
         }
         
     } catch (error) {
