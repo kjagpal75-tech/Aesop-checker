@@ -3,6 +3,8 @@ const puppeteer = require('puppeteer');
 const express = require('express');
 const nodemailer = require('nodemailer');
 const path = require('path');
+const fs = require('fs');
+const https = require('https');
 const CONFIG = require('./config'); // Load config from separate file
 
 // State
@@ -514,12 +516,6 @@ async function acceptJob(jobId) {
             message: `Failed to accept job ${jobId}: ${error.message}`
         };
     }
-    
-    // This should never be reached, but just in case
-    return {
-        success: false,
-        message: `Failed to accept job ${jobId}: Unknown error occurred`
-    };
 }
 
 // Function to get next 30 business days
@@ -748,7 +744,7 @@ async function checkForShifts() {
         console.log('🔍 Removing date restrictions to search all available jobs...');
         try {
             // Wait for page to fully load
-            await page.waitForTimeout(2000);
+            await new Promise(resolve => setTimeout(resolve, 2000));
             
             // Look for and clear any date filters
             const dateFiltersCleared = await page.evaluate(() => {
@@ -825,7 +821,7 @@ async function checkForShifts() {
                 if (searchButton) {
                     await page.click(searchButton);
                     console.log('🔍 Clicked search/refresh button to apply date filter changes');
-                    await page.waitForTimeout(3000);
+                    await new Promise(resolve => setTimeout(resolve, 3000));
                 } else {
                     console.log('ℹ️ No search button found, date filters may be auto-applied');
                 }
@@ -1770,35 +1766,89 @@ app.get('/health/detailed', (req, res) => {
 });
 
 // Start the Express server
-const PORT = 3000;
-app.listen(PORT, async () => {
-    console.log(`Dashboard available at http://localhost:${PORT}`);
-    console.log(`Checking for shifts every ${CONFIG.checkInterval / 60000} minutes`);
-    
-    // Test email configuration on startup
-    console.log('\n=== Email Configuration Test ===');
-    await testEmailConfiguration();
-    console.log('================================\n');
-    
-    // Set up periodic Chrome cleanup (every 30 minutes)
-    setInterval(async () => {
-        console.log('🧹 Running periodic Chrome cleanup...');
-        await cleanupChromeProcesses();
-    }, 30 * 60 * 1000); // 30 minutes
-    
-    // Initial Chrome cleanup on startup
-    console.log('🧹 Running initial Chrome cleanup...');
-    await cleanupChromeProcesses();
-    
-    // Start the job checking interval
-    setInterval(async () => {
-        try {
-            await checkForShifts();
-        } catch (error) {
-            console.error('Error in scheduled job check:', error);
-        }
-    }, CONFIG.checkInterval);
-    
-    // Run initial check
-    await checkForShifts();
+const HTTP_PORT = 3000;
+const HTTPS_PORT = 8443; // Use non-privileged port for HTTPS
+
+// Load SSL certificates
+let sslOptions = null;
+try {
+    sslOptions = {
+        key: fs.readFileSync('/home/kuljitjagpal/aesop-checker/ssl/key.pem'),
+        cert: fs.readFileSync('/home/kuljitjagpal/aesop-checker/ssl/cert.pem')
+    };
+    console.log('🔒 SSL certificates loaded successfully');
+} catch (sslError) {
+    console.log('⚠️ SSL certificates not found, running HTTP only');
+}
+
+// Start HTTP server (redirect to HTTPS)
+const httpApp = express();
+httpApp.get('*', (req, res) => {
+    res.redirect(`https://34.71.197.190:${HTTPS_PORT}${req.url}`);
 });
+httpApp.listen(HTTP_PORT, () => {
+    console.log(`🌐 HTTP redirect server running on port ${HTTP_PORT}`);
+});
+
+// Start HTTPS server
+if (sslOptions) {
+    https.createServer(sslOptions, app).listen(HTTPS_PORT, async () => {
+        console.log(`🔒 HTTPS Dashboard available at https://34.71.197.190:${HTTPS_PORT}`);
+        console.log(`🌐 HTTP redirects to HTTPS on port ${HTTP_PORT} → ${HTTPS_PORT}`);
+        console.log(`🔄 Checking for shifts every ${CONFIG.checkInterval / 60000} minutes`);
+        
+        // Test email configuration on startup
+        console.log('\n=== Email Configuration Test ===');
+        await testEmailConfiguration();
+        console.log('================================\n');
+        
+        // Set up periodic Chrome cleanup (every 30 minutes)
+        setInterval(async () => {
+            await cleanupChromeProcesses();
+        }, 30 * 60 * 1000);
+        
+        await cleanupChromeProcesses();
+        
+        // Start the job checking interval
+        setInterval(async () => {
+            try {
+                await checkForShifts();
+            } catch (error) {
+                console.error('Error in scheduled job check:', error);
+            }
+        }, CONFIG.checkInterval);
+        
+        // Run initial check
+        await checkForShifts();
+    });
+} else {
+    // Fallback to HTTP only
+    app.listen(HTTP_PORT, async () => {
+        console.log(`🌐 HTTP Dashboard available at http://34.71.197.190:${HTTP_PORT}`);
+        console.log(`⚠️ SSL not available - running HTTP only`);
+        console.log(`🔄 Checking for shifts every ${CONFIG.checkInterval / 60000} minutes`);
+        
+        // Test email configuration on startup
+        console.log('\n=== Email Configuration Test ===');
+        await testEmailConfiguration();
+        console.log('================================\n');
+        
+        // Set up periodic Chrome cleanup (every 30 minutes)
+        setInterval(async () => {
+            await cleanupChromeProcesses();
+        }, 30 * 60 * 1000);
+        
+        await cleanupChromeProcesses();
+        
+        // Start the job checking interval
+        setInterval(async () => {
+            try {
+                await checkForShifts();
+            } catch (error) {
+                console.error('Error in scheduled job check:', error);
+            }
+        }, CONFIG.checkInterval);
+        
+        // Run initial check
+        await checkForShifts();
+    });
