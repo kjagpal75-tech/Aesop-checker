@@ -1827,6 +1827,193 @@ app.get('/health/detailed', (req, res) => {
     res.json(health);
 });
 
+// Enhanced cleanup for orphaned browser sessions
+async function cleanupOrphanedBrowsers() {
+    try {
+        console.log('🔍 Scanning for orphaned browser sessions...');
+        
+        // Get all Chrome processes
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execPromise = util.promisify(exec);
+        
+        try {
+            const { stdout } = await execPromise('ps aux | grep chrome | grep -v grep');
+            const chromeProcesses = stdout.trim().split('\n');
+            
+            if (chromeProcesses.length > 0) {
+                console.log(`🔍 Found ${chromeProcesses.length} Chrome processes`);
+                
+                // Check for processes older than 1 hour (3600000 ms)
+                const oneHourAgo = Date.now() - 3600000;
+                let orphanedCount = 0;
+                
+                for (const process of chromeProcesses) {
+                    const parts = process.trim().split(/\s+/);
+                    if (parts.length >= 2) {
+                        const pid = parts[1];
+                        try {
+                            // Get process start time
+                            const { stdout: statOutput } = await execPromise(`ps -o lstart= -p ${pid}`);
+                            const startTime = statOutput.trim();
+                            
+                            // Check if process is older than 1 hour
+                            const processAge = Date.now() - new Date(startTime).getTime();
+                            if (processAge > oneHourAgo) {
+                                console.log(`🧹 Found orphaned Chrome process ${pid} (age: ${Math.round(processAge/60000)} minutes)`);
+                                
+                                // Kill orphaned process
+                                await execPromise(`kill -9 ${pid}`);
+                                orphanedCount++;
+                            }
+                        } catch (error) {
+                            // Process might have already ended
+                            continue;
+                        }
+                    }
+                }
+                
+                if (orphanedCount > 0) {
+                    console.log(`🧹 Cleaned up ${orphanedCount} orphaned Chrome processes`);
+                } else {
+                    console.log('✅ No orphaned Chrome processes found');
+                }
+            }
+        } catch (error) {
+            console.log('Error scanning Chrome processes:', error.message);
+        }
+        
+        // Also check for orphaned browser instances in our application
+        if (browser && !browser.isConnected()) {
+            console.log('🧹 Cleaning up disconnected main browser');
+            try {
+                await browser.close();
+            } catch (error) {
+                console.log('Error closing disconnected browser:', error.message);
+            }
+            browser = null;
+            page = null;
+            sessionCookies = null;
+            lastLoginTime = null;
+        }
+        
+        if (acceptJobBrowser && !acceptJobBrowser.isConnected()) {
+            console.log('🧹 Cleaning up disconnected accept job browser');
+            try {
+                await acceptJobBrowser.close();
+            } catch (error) {
+                console.log('Error closing disconnected accept job browser:', error.message);
+            }
+            acceptJobBrowser = null;
+            acceptJobPage = null;
+            lastAcceptJobTime = null;
+        }
+        
+    } catch (error) {
+        console.log('Error during orphaned browser cleanup:', error.message);
+    }
+}
+
+// Optimized login session management with server load reduction
+async function loginAndMaintainSession() {
+    // Check if we have a valid login session (extended to 45 minutes to reduce logins)
+    if (browser && page && !page.isClosed() && sessionCookies && lastLoginTime) {
+        const sessionAge = Date.now() - lastLoginTime;
+        const fortyFiveMinutes = 45 * 60 * 1000; // Extended from 30 to 45 minutes
+        
+        if (sessionAge < fortyFiveMinutes) {
+            console.log(`🔄 Using existing login session (age: ${Math.round(sessionAge/60000)} minutes) - saving server load`);
+            try {
+                // Test if session is still valid by checking current page
+                const currentUrl = page.url();
+                if (currentUrl.includes('frontlineeducation.com') && !currentUrl.includes('login')) {
+                    console.log('✅ Login session is still valid - no server login needed');
+                    lastLoginTime = Date.now(); // Extend session time
+                    return { browser, page };
+                } else {
+                    console.log('🔄 Session expired, will re-login');
+                }
+            } catch (error) {
+                console.log('🔄 Session test failed, will re-login');
+            }
+        } else {
+            console.log(`🔄 Login session expired (${Math.round(sessionAge/60000)} minutes), re-logging in`);
+        }
+    } else {
+        console.log('🔄 No existing login session, creating new one');
+    }
+
+    // Need to login or re-login
+    console.log('🔐 Logging into Aesop (server login event)...');
+    
+    // Close existing browser if it exists but is disconnected
+    if (browser && !browser.isConnected()) {
+        try {
+            await browser.close();
+        } catch (error) {
+            console.log('Error closing disconnected browser:', error.message);
+        }
+        browser = null;
+        page = null;
+    }
+
+    // Launch new browser or reuse existing
+    if (!browser) {
+        console.log('🚀 Launching new browser for login');
+        browser = await puppeteer.launch({
+            headless: 'new',
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--no-first-run',
+                '--disable-extensions',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
+            ]
+        });
+
+        page = await browser.newPage();
+        await page.setViewport({ width: 1280, height: 800 });
+        
+        // Set more forgiving timeouts
+        page.setDefaultTimeout(60000);
+        page.setDefaultNavigationTimeout(90000);
+    }
+
+    // Login to Aesop
+    await page.goto(CONFIG.aesopUrl, { 
+        waitUntil: 'networkidle2', 
+        timeout: 60000 
+    });
+
+    await page.waitForSelector('#Username', { timeout: 10000 });
+    await page.waitForSelector('#Password', { timeout: 10000 });
+
+    await page.click('#Username', { clickCount: 3 });
+    await page.type('#Username', CONFIG.username, { delay: 50 });
+    
+    await page.click('#Password', { clickCount: 3 });
+    await page.type('#Password', CONFIG.password, { delay: 50 });
+
+    await Promise.all([
+        page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+        page.click('#qa-button-login')
+    ]);
+
+    await new Promise(resolve => setTimeout(resolve, 3000));
+
+    // Save session cookies and time
+    sessionCookies = await page.cookies();
+    lastLoginTime = Date.now();
+    
+    console.log('✅ Login successful, session maintained for 45 minutes');
+    
+    return { browser, page };
+}
+
 // Start the Express server
 const PORT = 3000;
 app.listen(PORT, async () => {
@@ -1838,11 +2025,12 @@ app.listen(PORT, async () => {
     await testEmailConfiguration();
     console.log('================================\n');
     
-    // Set up periodic Chrome cleanup (every 30 minutes)
+    // Set up periodic Chrome cleanup with enhanced orphaned browser detection
     setInterval(async () => {
-        console.log('🧹 Running periodic Chrome cleanup...');
+        console.log('🧹 Running periodic Chrome and session cleanup...');
         await cleanupChromeProcesses();
-        await cleanupAcceptJobBrowser(); // Also cleanup accept job browser session
+        await cleanupAcceptJobBrowser(); // Cleanup accept job browser session
+        await cleanupOrphanedBrowsers(); // NEW: Cleanup orphaned browsers
     }, 30 * 60 * 1000); // 30 minutes
     
     // Initial Chrome cleanup on startup
