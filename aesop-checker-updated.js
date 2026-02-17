@@ -335,19 +335,87 @@ app.get('/accept-error/:jobId', (req, res) => {
     `);
 });
 
-// Function to accept a job
-async function acceptJob(jobId) {
-    console.log(`Attempting to accept job ${jobId}...`);
-    
-    let browser;
+// Job acceptance browser session management
+let acceptJobBrowser = null;
+let acceptJobPage = null;
+let lastAcceptJobTime = null;
+const BROWSER_SESSION_TIMEOUT = 10 * 60 * 1000; // 10 minutes
+
+// Function to get or create browser session for job acceptance
+async function getAcceptJobBrowser() {
     try {
-        browser = await puppeteer.launch({
+        // Check if existing browser is still connected and not too old
+        if (acceptJobBrowser && acceptJobBrowser.isConnected() && 
+            lastAcceptJobTime && (Date.now() - lastAcceptJobTime < BROWSER_SESSION_TIMEOUT)) {
+            
+            console.log('🔄 Reusing existing browser session for job acceptance');
+            
+            // Check if page is still valid
+            if (acceptJobPage && !acceptJobPage.isClosed()) {
+                return { browser: acceptJobBrowser, page: acceptJobPage };
+            } else {
+                // Create new page in existing browser
+                acceptJobPage = await acceptJobBrowser.newPage();
+                await acceptJobPage.setViewport({ width: 1280, height: 800 });
+                return { browser: acceptJobBrowser, page: acceptJobPage };
+            }
+        }
+        
+        // Close old browser if it exists
+        if (acceptJobBrowser) {
+            try {
+                await acceptJobBrowser.close();
+            } catch (error) {
+                console.log('Error closing old browser:', error.message);
+            }
+        }
+        
+        console.log('🚀 Creating new browser session for job acceptance');
+        acceptJobBrowser = await puppeteer.launch({
             headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--no-first-run',
+                '--disable-extensions',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding'
+            ]
         });
 
-        const page = await browser.newPage();
-        await page.setViewport({ width: 1280, height: 800 });
+        acceptJobPage = await acceptJobBrowser.newPage();
+        await acceptJobPage.setViewport({ width: 1280, height: 800 });
+        
+        // Set more forgiving timeouts
+        acceptJobPage.setDefaultTimeout(60000);
+        acceptJobPage.setDefaultNavigationTimeout(90000);
+        
+        lastAcceptJobTime = Date.now();
+        return { browser: acceptJobBrowser, page: acceptJobPage };
+        
+    } catch (error) {
+        console.log('❌ Error getting browser session:', error.message);
+        // Reset session on error
+        acceptJobBrowser = null;
+        acceptJobPage = null;
+        lastAcceptJobTime = null;
+        throw error;
+    }
+}
+
+// Function to accept a job
+async function acceptJob(jobId) {
+    console.log(`🎯 Attempting to accept job ${jobId}...`);
+    
+    let browser, page;
+    try {
+        // Get or reuse browser session
+        const session = await getAcceptJobBrowser();
+        browser = session.browser;
+        page = session.page;
 
         // Login to Aesop
         console.log('Logging in to accept job...');
@@ -408,7 +476,8 @@ async function acceptJob(jobId) {
                 return successElements.length > 0;
             });
 
-            await browser.close();
+            // Update session time for reuse
+            lastAcceptJobTime = Date.now();
             
             return {
                 success: true,
@@ -416,7 +485,8 @@ async function acceptJob(jobId) {
                 confirmed: confirmation
             };
         } else {
-            await browser.close();
+            // Update session time even if accept failed
+            lastAcceptJobTime = Date.now();
             return {
                 success: false,
                 message: `Could not find accept button for job ${jobId}. Job may no longer be available.`
@@ -424,10 +494,41 @@ async function acceptJob(jobId) {
         }
 
     } catch (error) {
-        if (browser) {
-            await browser.close();
+        // Reset session on error
+        console.log('❌ Accept job error, resetting browser session:', error.message);
+        try {
+            if (acceptJobBrowser) {
+                await acceptJobBrowser.close();
+            }
+        } catch (closeError) {
+            console.log('Error closing browser during cleanup:', closeError.message);
         }
+        acceptJobBrowser = null;
+        acceptJobPage = null;
+        lastAcceptJobTime = null;
         throw error;
+    }
+}
+
+// Function to cleanup old browser sessions
+async function cleanupAcceptJobBrowser() {
+    try {
+        if (acceptJobBrowser && lastAcceptJobTime) {
+            const sessionAge = Date.now() - lastAcceptJobTime;
+            if (sessionAge > BROWSER_SESSION_TIMEOUT) {
+                console.log('🧹 Cleaning up old accept job browser session');
+                try {
+                    await acceptJobBrowser.close();
+                } catch (error) {
+                    console.log('Error closing old browser during cleanup:', error.message);
+                }
+                acceptJobBrowser = null;
+                acceptJobPage = null;
+                lastAcceptJobTime = null;
+            }
+        }
+    } catch (error) {
+        console.log('Error during accept job browser cleanup:', error.message);
     }
 }
 
@@ -1693,6 +1794,7 @@ app.listen(PORT, async () => {
     setInterval(async () => {
         console.log('🧹 Running periodic Chrome cleanup...');
         await cleanupChromeProcesses();
+        await cleanupAcceptJobBrowser(); // Also cleanup accept job browser session
     }, 30 * 60 * 1000); // 30 minutes
     
     // Initial Chrome cleanup on startup
