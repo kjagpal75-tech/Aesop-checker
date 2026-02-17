@@ -15,13 +15,6 @@ let sessionCookies = null;
 let lastLoginTime = null;
 let isChecking = false;
 
-// Unified session management
-let unifiedBrowser = null;
-let unifiedPage = null;
-let unifiedSessionId = null;
-let lastSessionActivity = null;
-const UNIFIED_SESSION_TIMEOUT = 30 * 60 * 1000; // 30 minutes
-
 // Real-time monitoring variables
 let realTimeBrowser = null;
 let realTimePage = null;
@@ -335,6 +328,12 @@ app.get('/accept-error/:jobId', (req, res) => {
                     <p class="text-xs text-gray-500 mt-6">
                         You can still accept the job manually by logging into Aesop.
                     </p>
+                </div>
+            </div>
+        </body>
+        </html>
+    `);
+});
 
 // Job acceptance browser session management
 let acceptJobBrowser = null;
@@ -409,44 +408,92 @@ async function getAcceptJobBrowser() {
 
 // Function to accept a job
 async function acceptJob(jobId) {
-    console.log(`🎯 Attempting to accept job ${jobId}...`);
+    console.log(`🎯 Attempting to accept job ${jobId} using existing session...`);
     
     let browser, page;
     try {
-        // Get or reuse browser session
-        const session = await getAcceptJobBrowser();
-        browser = session.browser;
-        page = session.page;
+        // Use the existing browser session from job checking if available
+        if (browser && page && !page.isClosed()) {
+            console.log('🔄 Using existing browser session from job checking');
+            // Check if we're still logged in
+            const currentUrl = page.url();
+            if (currentUrl.includes('frontlineeducation.com') && !currentUrl.includes('login')) {
+                console.log('✅ Using existing logged-in session');
+                
+                // Navigate to Available Jobs page
+                console.log('Navigating to Available Jobs to accept job...');
+                await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
+                    waitUntil: 'networkidle2',
+                    timeout: 30000
+                });
+            } else {
+                console.log('Session expired, logging in...');
+                // Login using existing browser
+                await page.goto(CONFIG.aesopUrl, { 
+                    waitUntil: 'networkidle2', 
+                    timeout: 60000 
+                });
 
-        // Login to Aesop
-        console.log('Logging in to accept job...');
-        await page.goto(CONFIG.aesopUrl, { 
-            waitUntil: 'networkidle2', 
-            timeout: 60000 
-        });
+                await page.waitForSelector('#Username', { timeout: 10000 });
+                await page.waitForSelector('#Password', { timeout: 10000 });
 
-        await page.waitForSelector('#Username', { timeout: 10000 });
-        await page.waitForSelector('#Password', { timeout: 10000 });
+                await page.click('#Username', { clickCount: 3 });
+                await page.type('#Username', CONFIG.username, { delay: 50 });
+                
+                await page.click('#Password', { clickCount: 3 });
+                await page.type('#Password', CONFIG.password, { delay: 50 });
 
-        await page.click('#Username', { clickCount: 3 });
-        await page.type('#Username', CONFIG.username, { delay: 50 });
-        
-        await page.click('#Password', { clickCount: 3 });
-        await page.type('#Password', CONFIG.password, { delay: 50 });
+                await Promise.all([
+                    page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+                    page.click('#qa-button-login')
+                ]);
 
-        await Promise.all([
-            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
-            page.click('#qa-button-login')
-        ]);
+                await new Promise(resolve => setTimeout(resolve, 3000));
 
-        await new Promise(resolve => setTimeout(resolve, 3000));
+                // Navigate to Available Jobs page
+                console.log('Navigating to Available Jobs to accept job...');
+                await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
+                    waitUntil: 'networkidle2',
+                    timeout: 30000
+                });
+            }
+        } else {
+            console.log('No existing session, creating new one...');
+            // Fallback to creating new browser session
+            const session = await getAcceptJobBrowser();
+            browser = session.browser;
+            page = session.page;
 
-        // Navigate to Available Jobs page
-        console.log('Navigating to Available Jobs to accept job...');
-        await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
-            waitUntil: 'networkidle2',
-            timeout: 30000
-        });
+            // Login to Aesop
+            console.log('Logging in to accept job...');
+            await page.goto(CONFIG.aesopUrl, { 
+                waitUntil: 'networkidle2', 
+                timeout: 60000 
+            });
+
+            await page.waitForSelector('#Username', { timeout: 10000 });
+            await page.waitForSelector('#Password', { timeout: 10000 });
+
+            await page.click('#Username', { clickCount: 3 });
+            await page.type('#Username', CONFIG.username, { delay: 50 });
+            
+            await page.click('#Password', { clickCount: 3 });
+            await page.type('#Password', CONFIG.password, { delay: 50 });
+
+            await Promise.all([
+                page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }),
+                page.click('#qa-button-login')
+            ]);
+
+            await new Promise(resolve => setTimeout(resolve, 3000));
+
+            // Navigate to Available Jobs page
+            console.log('Navigating to Available Jobs to accept job...');
+            await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
+                waitUntil: 'networkidle2',
+                timeout: 30000
+            });
+        }
 
         await new Promise(resolve => setTimeout(resolve, 3000));
 
