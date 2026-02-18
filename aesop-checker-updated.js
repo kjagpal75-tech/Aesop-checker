@@ -406,15 +406,24 @@ async function getAcceptJobBrowser() {
     }
 }
 
-// Function to accept a job
-async function acceptJob(jobId) {
-    console.log(`🎯 Attempting to accept job ${jobId} using existing session...`);
+// Enhanced acceptJob function with retry logic for Target closed errors
+async function acceptJob(jobId, retryCount = 0) {
+    const maxRetries = 3;
+    const retryDelay = 3000; // 3 seconds
+    
+    console.log(`🎯 Attempting to accept job ${jobId}${retryCount > 0 ? ` (retry ${retryCount}/${maxRetries})` : ''}...`);
     
     let browser, page;
     try {
         // Use the existing browser session from job checking if available
         if (browser && page && !page.isClosed()) {
             console.log('🔄 Using existing browser session from job checking');
+            
+            // Test if browser is still connected
+            if (!browser.isConnected()) {
+                throw new Error('Browser connection lost - Target closed');
+            }
+            
             // Check if we're still logged in
             const currentUrl = page.url();
             if (currentUrl.includes('frontlineeducation.com') && !currentUrl.includes('login')) {
@@ -498,52 +507,109 @@ async function acceptJob(jobId) {
         await new Promise(resolve => setTimeout(resolve, 3000));
 
         // Find and click the accept button for the specific job
-        const acceptSuccess = await page.evaluate((targetJobId) => {
-            const jobRows = document.querySelectorAll('tbody.job');
-            
-            for (let row of jobRows) {
-                const jobIdElement = row.getAttribute('id');
-                if (jobIdElement === targetJobId || row.textContent.includes(targetJobId)) {
-                    const acceptButton = row.querySelector('.acceptButton');
-                    if (acceptButton) {
-                        console.log(`Found accept button for job ${targetJobId}`);
-                        acceptButton.click();
-                        return true;
-                    }
-                }
+        const acceptResult = await page.evaluate((jobId) => {
+            const acceptButton = document.querySelector(`button[data-job-id="${jobId}"], button[onclick*="${jobId}"], .accept-job-btn[data-job-id="${jobId}"]`);
+            if (acceptButton) {
+                acceptButton.click();
+                return { success: true, message: 'Accept button clicked' };
             }
-            return false;
+            return { success: false, message: 'Accept button not found' };
         }, jobId);
 
-        if (acceptSuccess) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-            
-            // Look for confirmation dialog or success message
-            const confirmation = await page.evaluate(() => {
-                const successElements = document.querySelectorAll('[class*="success"], [class*="confirm"], [class*="accepted"]');
-                return successElements.length > 0;
-            });
+        if (!acceptResult.success) {
+            throw new Error(acceptResult.message);
+        }
 
-            // Update session time for reuse
-            lastAcceptJobTime = Date.now();
-            
+        // Wait for confirmation
+        await new Promise(resolve => setTimeout(resolve, 3000));
+
+        // Check for confirmation message
+        const confirmation = await page.evaluate(() => {
+            const confirmationElement = document.querySelector('.success-message, .confirmation-message, .alert-success, [data-testid="accept-confirmation"]');
+            if (confirmationElement) {
+                return confirmationElement.textContent.trim();
+            }
+            return null;
+        });
+
+        if (confirmation) {
+            console.log(`✅ Job ${jobId} accepted successfully! Confirmation: ${confirmation}`);
             return {
                 success: true,
-                message: `Successfully accepted job ${jobId}`,
-                confirmed: confirmation
+                jobId: jobId,
+                message: confirmation,
+                timestamp: new Date().toISOString()
             };
         } else {
-            // Update session time even if accept failed
-            lastAcceptJobTime = Date.now();
+            // Check if job is no longer available
+            const jobNotAvailable = await page.evaluate(() => {
+                const notAvailableElement = document.querySelector('.job-not-available, .job-taken, .error-message');
+                if (notAvailableElement) {
+                    return notAvailableElement.textContent.trim();
+                }
+                return null;
+            });
+
+            if (jobNotAvailable) {
+                return {
+                    success: false,
+                    jobId: jobId,
+                    message: `Job no longer available: ${jobNotAvailable}`,
+                    timestamp: new Date().toISOString()
+                };
+            }
+
+            // Assume success if no explicit failure message
+            console.log(`✅ Job ${jobId} likely accepted (no explicit confirmation found)`);
             return {
-                success: false,
-                message: `Could not find accept button for job ${jobId}. Job may no longer be available.`
+                success: true,
+                jobId: jobId,
+                message: 'Job accepted (no explicit confirmation)',
+                timestamp: new Date().toISOString()
             };
         }
 
     } catch (error) {
-        // Reset session on error
-        console.log('❌ Accept job error, resetting browser session:', error.message);
+        console.log(`❌ Accept job error (attempt ${retryCount + 1}):`, error.message);
+        
+        // Check if this is a retryable error
+        const retryableErrors = [
+            'Target closed',
+            'Protocol error',
+            'Connection lost',
+            'Browser disconnected',
+            'Session closed',
+            'Navigation timeout'
+        ];
+        
+        const isRetryable = retryableErrors.some(retryError => 
+            error.message.includes(retryError)
+        );
+        
+        if (isRetryable && retryCount < maxRetries) {
+            console.log(`🔄 Retryable error detected, retrying in ${retryDelay/1000} seconds...`);
+            
+            // Clean up any existing browser session
+            try {
+                if (acceptJobBrowser) {
+                    await acceptJobBrowser.close();
+                }
+            } catch (closeError) {
+                console.log('Error closing browser during retry cleanup:', closeError.message);
+            }
+            acceptJobBrowser = null;
+            acceptJobPage = null;
+            lastAcceptJobTime = null;
+            
+            // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, retryDelay));
+            
+            // Retry the job acceptance
+            return await acceptJob(jobId, retryCount + 1);
+        }
+        
+        // Reset session on final error
+        console.log('❌ Final accept job error, resetting browser session:', error.message);
         try {
             if (acceptJobBrowser) {
                 await acceptJobBrowser.close();
@@ -554,6 +620,7 @@ async function acceptJob(jobId) {
         acceptJobBrowser = null;
         acceptJobPage = null;
         lastAcceptJobTime = null;
+        
         throw error;
     }
 }
