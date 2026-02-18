@@ -499,8 +499,8 @@ async function acceptJob(jobId, retryCount = 0) {
             // Navigate to Available Jobs page
             console.log('Navigating to Available Jobs to accept job...');
             await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
-                waitUntil: 'networkidle2',
-                timeout: 30000
+                waitUntil: 'domcontentloaded',
+                timeout: 60000 // Increased from 30s to 60s
             });
         }
 
@@ -873,8 +873,8 @@ async function checkForShifts() {
         console.log('🎯 Navigating to Available Jobs page to check for shifts...');
         try {
             await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
-                waitUntil: 'networkidle2',
-                timeout: 30000
+                waitUntil: 'domcontentloaded',
+                timeout: 60000 // Increased from 30s to 60s
             });
             console.log('✅ Successfully navigated to Available Jobs page');
             
