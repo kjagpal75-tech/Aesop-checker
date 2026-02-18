@@ -1081,32 +1081,8 @@ async function checkForShifts() {
                                     const lastShift = items[0]; // First item is last day
                                     const firstDate = new Date(firstShift.Start);
                                     const lastDate = new Date(lastShift.Start);
-                                    
-                                    let dateStr = '';
-                                    if (firstDate.toDateString() !== lastDate.toDateString()) {
-                                        dateStr = `${firstDate.toLocaleDateString()} - ${lastDate.toLocaleDateString()}`;
-                                    } else {
-                                        dateStr = firstDate.toLocaleDateString();
-                                    }
-                                    
-                                    const shift = {
-                                        id: job.Id,
-                                        position: job.WorkerTitle || 'Unknown Position',
-                                        school: job.OrganizationName || 'Unknown School',
-                                        date: dateStr,
-                                        startDate: firstDate,
-                                        endDate: lastDate,
-                                        hoursInFuture: Math.floor((firstDate - new Date()) / (1000 * 60 * 60)),
-                                        details: job
-                                    };
-                                    
-                                    console.log(`🎯 PARSED SHIFT: ${JSON.stringify(shift, null, 2)}`);
-                                    shifts.push(shift);
                                 } else {
-                                    console.log(`❌ SKIPPING JOB - No items: ${job.Id}`);
-                                }
-                                // Auto-Accept Logic: Check if job is 48+ hours in future
-                                if (CONFIG.autoAcceptEnabled) {
+                                    console.log(`🚀 AUTO-ACCEPTING: Job ${job.Id} - ${job.WorkerTitle} at ${shiftData.school}`);
                                     const jobStartTime = job.Items && job.Items[0] ? new Date(job.Items[0].Start) : new Date(job.Start);
                                     const currentTime = new Date();
                                     const hoursInFuture = (jobStartTime - currentTime) / (1000 * 60 * 60);
