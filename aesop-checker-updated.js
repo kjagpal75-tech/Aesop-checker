@@ -869,6 +869,23 @@ async function checkForShifts() {
         browser = currentBrowser;
         page = currentPage;
 
+        // CRITICAL: Navigate to Available Jobs page to get job data
+        console.log('🎯 Navigating to Available Jobs page to check for shifts...');
+        try {
+            await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
+                waitUntil: 'networkidle2',
+                timeout: 30000
+            });
+            console.log('✅ Successfully navigated to Available Jobs page');
+            
+            // Wait for page to fully load
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            
+        } catch (navError) {
+            console.log('❌ Error navigating to Available Jobs page:', navError.message);
+            throw new Error(`Failed to navigate to Available Jobs: ${navError.message}`);
+        }
+
         // Remove any date restrictions to search indefinitely into the future
         console.log('🔍 Removing date restrictions to search all available jobs...');
         try {
@@ -1007,6 +1024,26 @@ async function checkForShifts() {
             const afterLoginHtml = fs.readFileSync('after-login.html', 'utf8');
             console.log('Read after-login.html file, length:', afterLoginHtml.length);
             
+            // Enhanced debugging: Check what page we're actually on
+            const pageUrlCheck = afterLoginHtml.match(/window\.location\.href\s*=\s*['"]([^'"]+)['"]/) ||
+                               afterLoginHtml.match(/href=['"]([^'"]+)['"][^>]*>Available Jobs/) ||
+                               afterLoginHtml.match(/<title[^>]*>([^<]+)<\/title>/);
+            
+            if (pageUrlCheck) {
+                console.log('🔍 Page detection - Title/URL:', pageUrlCheck[1] || pageUrlCheck[0]);
+            }
+            
+            // Check if we're on the Available Jobs page
+            const isAvailableJobsPage = afterLoginHtml.toLowerCase().includes('available jobs') ||
+                                       afterLoginHtml.toLowerCase().includes('schedule/availablejobs') ||
+                                       afterLoginHtml.includes('AvailableJobs');
+            
+            console.log(`🔍 Is Available Jobs page: ${isAvailableJobsPage}`);
+            
+            if (!isAvailableJobsPage) {
+                console.log('⚠️ Not on Available Jobs page - job data may not be loaded');
+            }
+            
             // Parse the pageVars object to get availJobs
             const pageVarsMatch = afterLoginHtml.match(/var pageVars = ({[\s\S]*?});/);
             console.log(`pageVars match: ${!!pageVarsMatch}`);
@@ -1026,76 +1063,48 @@ async function checkForShifts() {
                     if (pageVars.availJobs) {
                         console.log(`pageVars.availJobs keys:`, Object.keys(pageVars.availJobs));
                     
-            if (pageVars && pageVars.availJobs && pageVars.availJobs.list) {
-                console.log(`📊 Found ${pageVars.availJobs.list.length} jobs in pageVars.availJobs.list`);
+                    if (pageVars && pageVars.availJobs && pageVars.availJobs.list) {
+                        console.log(`📊 Found ${pageVars.availJobs.list.length} jobs in pageVars.availJobs.list`);
                         
-                for (const job of pageVars.availJobs.list) {
-                    console.log(`🔍 PAGEVARS JOB DEBUG: ID=${job.Id}, Title=${job.WorkerTitle}, SubstituteId=${job.SubstituteId}`);
+                        for (const job of pageVars.availJobs.list) {
+                            console.log(`🔍 PAGEVARS JOB DEBUG: ID=${job.Id}, Title=${job.WorkerTitle}, SubstituteId=${job.SubstituteId}`);
                             console.log(`Items count: ${job.Items ? job.Items.length : 0}`);
                             console.log(`SubstituteId: ${job.SubstituteId}`);
                             
                             // Only process jobs with SubstituteId: null (available jobs)
-                            if (job.SubstituteId === null) {
-                                // Accept all available jobs - no position filtering needed
-                                console.log(`Processing available job: ${job.WorkerTitle}`);
-                                
-                                // Format date and time using Items array or Start/EndDate
-                                let dateStr = 'N/A';
-                                let timeStr = 'N/A';
+                            if (job.SubstituteId === null || job.SubstituteId === '') {
+                                console.log(`✅ JOB IS AVAILABLE - processing: ${job.Id}`);
                                 
                                 if (job.Items && job.Items.length > 0) {
-                                    // Parse the Items array to get individual shifts
                                     const items = job.Items;
-                                    const firstShift = items[0]; // First item is first day
-                                    const lastShift = items[items.length - 1]; // Last item is last day
-                                    
+                                    const firstShift = items[items.length - 1]; // Last item is first day
+                                    const lastShift = items[0]; // First item is last day
                                     const firstDate = new Date(firstShift.Start);
                                     const lastDate = new Date(lastShift.Start);
                                     
-                                    // Check if it's a multi-day range
+                                    let dateStr = '';
                                     if (firstDate.toDateString() !== lastDate.toDateString()) {
                                         dateStr = `${firstDate.toLocaleDateString()} - ${lastDate.toLocaleDateString()}`;
-                                        console.log(`Using date range from Items: ${dateStr}`);
                                     } else {
-                                        // Single day
                                         dateStr = firstDate.toLocaleDateString();
-                                        console.log(`Using single date from Items: ${dateStr}`);
                                     }
                                     
-                                    // Get time range from first and last shifts
-                                    const firstTime = new Date(firstShift.Start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                    const lastTime = new Date(lastShift.End).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                    timeStr = `${firstTime} - ${lastTime}`;
+                                    const shift = {
+                                        id: job.Id,
+                                        position: job.WorkerTitle || 'Unknown Position',
+                                        school: job.OrganizationName || 'Unknown School',
+                                        date: dateStr,
+                                        startDate: firstDate,
+                                        endDate: lastDate,
+                                        hoursInFuture: Math.floor((firstDate - new Date()) / (1000 * 60 * 60)),
+                                        details: job
+                                    };
                                     
-                                } else if (job.Start && job.EndDate) {
-                                    // Fallback to Start/EndDate fields
-                                    const startDate = new Date(job.Start);
-                                    const endDate = new Date(job.EndDate);
-                                    
-                                    if (startDate.toDateString() !== endDate.toDateString()) {
-                                        dateStr = `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
-                                        console.log(`Using date range from Start/EndDate: ${dateStr}`);
-                                    } else {
-                                        dateStr = startDate.toLocaleDateString();
-                                        console.log(`Using single date from Start: ${dateStr}`);
-                                    }
-                                    
-                                    const startTime = startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                    const endTime = endDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                    timeStr = `${startTime} - ${endTime}`;
+                                    console.log(`🎯 PARSED SHIFT: ${JSON.stringify(shift, null, 2)}`);
+                                    shifts.push(shift);
+                                } else {
+                                    console.log(`❌ SKIPPING JOB - No items: ${job.Id}`);
                                 }
-                                
-                                const shiftData = {
-                                    id: job.Id,
-                                    title: job.WorkerTitle,
-                                    employee: `${job.WorkerFirstName} ${job.WorkerLastName}`.trim(),
-                                    school: job.Items && job.Items[0] ? job.Items[0].Institution.Name : 'See details in Aesop',
-                                    date: dateStr,
-                                    time: timeStr,
-                                    duration: job.Items && job.Items[0] ? job.Items[0].Duration.substring(0, 5) : 'N/A',
-                                    foundAt: new Date().toISOString()
-                                };
-                                
                                 // Auto-Accept Logic: Check if job is 48+ hours in future
                                 if (CONFIG.autoAcceptEnabled) {
                                     const jobStartTime = job.Items && job.Items[0] ? new Date(job.Items[0].Start) : new Date(job.Start);
