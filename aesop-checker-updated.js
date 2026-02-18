@@ -1264,9 +1264,14 @@ async function checkForShifts() {
     } finally {
         isChecking = false;
         
-        // IMPORTANT: Always close browser after check to prevent memory leaks
-        // This ensures Chrome instances don't accumulate on the VM
-        if (browser && !error) {
+        // Check if we have new shifts that might need auto-accept
+        const hasAutoAcceptCandidates = newShifts.some(shift => 
+            CONFIG.autoAcceptEnabled && shift.hoursInFuture >= CONFIG.autoAcceptHoursInFuture
+        );
+        
+        // IMPORTANT: Don't close browser if we have auto-accept candidates
+        // Keep the browser session alive for auto-accept operations
+        if (browser && !error && !hasAutoAcceptCandidates) {
             try {
                 console.log('Closing browser after successful check to prevent memory leaks...');
                 await browser.close();
@@ -1278,6 +1283,9 @@ async function checkForShifts() {
                 browser = null;
                 page = null;
             }
+        } else if (browser && hasAutoAcceptCandidates) {
+            console.log('🔄 Keeping browser session alive for auto-accept operations');
+            console.log(`📊 Found ${newShifts.filter(s => CONFIG.autoAcceptEnabled && s.hoursInFuture >= CONFIG.autoAcceptHoursInFuture).length} auto-accept candidates`);
         }
     }
 }
