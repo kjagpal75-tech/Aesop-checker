@@ -807,9 +807,15 @@ async function sendEmailNotification(shifts) {
         </div>
     `).join('');
 
+    // Prepare recipients for job notifications
+    const recipients = [CONFIG.emailTo];
+    if (CONFIG.jobNotificationTo) {
+        recipients.push(CONFIG.jobNotificationTo.trim());
+    }
+    
     const mailOptions = {
         from: CONFIG.emailFrom,
-        to: CONFIG.emailTo,
+        to: recipients.join(', '),
         subject: `🔔 ${shifts.length} New Shift${shifts.length > 1 ? 's' : ''} Available - ${CONFIG.district}`,
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background-color: #ffffff;">

@@ -12,6 +12,9 @@ module.exports = {
     emailFrom: process.env.EMAIL_FROM,
     emailPassword: process.env.EMAIL_PASSWORD, // Fallback for App Password method
     
+    // Job Notification Configuration (additional recipients for new jobs only)
+    jobNotificationTo: process.env.JOB_NOTIFICATION_TO, // Additional recipients for job notifications only
+    
     // Debug/Error Email Configuration
     debugEmailTo: process.env.DEBUG_EMAIL_TO || process.env.EMAIL_FROM, // Default to EMAIL_FROM for debug/error messages
     
