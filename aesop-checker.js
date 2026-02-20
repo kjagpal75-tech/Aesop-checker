@@ -70,8 +70,21 @@ app.get('/api/check-now', async (req, res) => {
     if (isChecking) {
         return res.json({ message: 'Check already in progress' });
     }
-    checkForShifts();
-    res.json({ message: 'Check started' });
+    
+    try {
+        // Wait for the check to complete
+        await checkForShifts();
+        res.json({ 
+            message: 'Check completed',
+            lastChecked: lastChecked,
+            shiftsFound: availableShifts.length
+        });
+    } catch (error) {
+        res.status(500).json({ 
+            message: 'Check failed', 
+            error: error.message 
+        });
+    }
 });
 
 // Add job acceptance endpoint
@@ -80,21 +93,10 @@ app.get('/api/accept-job/:jobId', async (req, res) => {
     console.log(`Received request to accept job: ${jobId}`);
     
     try {
-        const result = await acceptJob(jobId);
-        res.json(result);
-    } catch (error) {
-        console.error('Error accepting job:', error);
-        res.status(500).json({ success: false, message: error.message });
-    }
-});
-
-// Function to accept a job
-async function acceptJob(jobId) {
-    console.log(`Attempting to accept job ${jobId}...`);
-    
-    let browser;
-    try {
-        browser = await puppeteer.launch({
+        // For API endpoint, we need to create a new browser session since we don't have an existing one
+        console.log('🔄 Creating new browser session for API endpoint request...');
+        
+        const browser = await puppeteer.launch({
             headless: 'new',
             args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
@@ -103,7 +105,7 @@ async function acceptJob(jobId) {
         await page.setViewport({ width: 1280, height: 800 });
 
         // Login to Aesop
-        console.log('Logging in to accept job...');
+        console.log('🔐 Logging in to accept job...');
         await page.goto(CONFIG.aesopUrl, { 
             waitUntil: 'networkidle2', 
             timeout: 60000 
@@ -125,8 +127,45 @@ async function acceptJob(jobId) {
 
         await new Promise(resolve => setTimeout(resolve, 3000));
 
+        // Use acceptJobWithSession with the new browser session
+        const result = await acceptJobWithSession(jobId, browser, page);
+        
+        // Close browser after API request
+        await browser.close();
+        
+        res.json(result);
+    } catch (error) {
+        console.error('Error accepting job:', error);
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// Function to accept a job with existing browser session
+async function acceptJobWithSession(jobId, browser, page) {
+    console.log(`🎯 Accepting job ${jobId} with existing browser session...`);
+    
+    try {
+        // Test if browser is still connected
+        if (!browser.isConnected()) {
+            throw new Error('Browser connection lost - Target closed');
+        }
+        
+        // Test if page is still valid
+        if (page.isClosed()) {
+            throw new Error('Page is closed - cannot accept job');
+        }
+        
+        // Check if we're still logged in
+        const currentUrl = page.url();
+        if (!currentUrl.includes('frontlineeducation.com') || currentUrl.includes('login')) {
+            console.log('❌ Session expired, need to re-login');
+            throw new Error('Session expired - need to re-login');
+        }
+        
+        console.log('✅ Using existing logged-in session');
+        
         // Navigate to Available Jobs page
-        console.log('Navigating to Available Jobs to accept job...');
+        console.log('🔍 Navigating to Available Jobs page...');
         await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
             waitUntil: 'networkidle2',
             timeout: 30000
@@ -143,7 +182,7 @@ async function acceptJob(jobId) {
                 if (jobIdElement === targetJobId || row.textContent.includes(targetJobId)) {
                     const acceptButton = row.querySelector('.acceptButton');
                     if (acceptButton) {
-                        console.log(`Found accept button for job ${targetJobId}`);
+                        console.log(`✅ Found accept button for job ${targetJobId}`);
                         acceptButton.click();
                         return true;
                     }
@@ -161,25 +200,20 @@ async function acceptJob(jobId) {
                 return successElements.length > 0;
             });
 
-            await browser.close();
-            
             return {
                 success: true,
-                message: `Successfully accepted job ${jobId}`,
+                message: `✅ Successfully accepted job ${jobId}`,
                 confirmed: confirmation
             };
         } else {
-            await browser.close();
             return {
                 success: false,
-                message: `Could not find accept button for job ${jobId}. Job may no longer be available.`
+                message: `❌ Could not find accept button for job ${jobId}. Job may no longer be available.`
             };
         }
 
     } catch (error) {
-        if (browser) {
-            await browser.close();
-        }
+        console.error('❌ Error accepting job:', error);
         throw error;
     }
 }
@@ -245,6 +279,10 @@ async function loginAndMaintainSession() {
 
     page = await browser.newPage();
     await page.setViewport({ width: 1280, height: 800 });
+    
+    // Assign to global variables for session continuity
+    global.browser = browser;
+    global.page = page;
 
     console.log('Navigating to Aesop login page...');
     await page.goto(CONFIG.aesopUrl, { 
@@ -385,8 +423,8 @@ async function checkForShifts() {
                     console.log(`pageVars text length: ${pageVarsText.length}`);
                     console.log(`pageVars text preview: ${pageVarsText.substring(0, 500)}...`);
                     
-                    // Use eval to parse the JavaScript object
-                    const pageVars = eval(`(${pageVarsText})`);
+                    // Use Function constructor instead of eval for better security
+                    const pageVars = new Function(`return ${pageVarsText}`)();
                     
                     console.log(`pageVars keys:`, Object.keys(pageVars));
                     console.log(`pageVars.availJobs: ${!!pageVars.availJobs}`);
@@ -569,8 +607,89 @@ async function checkForShifts() {
             
             // Send email notification
             await sendEmailNotification(newShifts);
+            
+            // AUTO-ACCEPT: Check for jobs that meet auto-accept criteria
+            if (CONFIG.autoAcceptEnabled) {
+                const autoAcceptCandidates = newShifts.filter(shift => {
+                    // Calculate hours in future - handle date parsing more robustly
+                    let shiftDate;
+                    try {
+                        // Try to parse the shift date - handle various date formats
+                        if (shift.foundAt) {
+                            // Use the foundAt timestamp which is in ISO format
+                            shiftDate = new Date(shift.foundAt);
+                        } else {
+                            // Fallback to parsing the date field
+                            shiftDate = new Date(shift.date);
+                        }
+                        
+                        // If date is invalid, skip this shift
+                        if (isNaN(shiftDate.getTime())) {
+                            console.log(`❌ AUTO-ACCEPT: Invalid date for shift ${shift.id}: ${shift.date}`);
+                            return false;
+                        }
+                    } catch (error) {
+                        console.log(`❌ AUTO-ACCEPT: Date parsing error for shift ${shift.id}: ${error.message}`);
+                        return false;
+                    }
+                    
+                    const now = new Date();
+                    const hoursInFuture = (shiftDate - now) / (1000 * 60 * 60);
+                    
+                    console.log(`🔧 AUTO-ACCEPT DEBUG: Processing shift ${shift.id}`);
+                    console.log(`📅 Shift Date: ${shiftDate.toISOString()}`);
+                    console.log(`🕐 Current Time: ${now.toISOString()}`);
+                    console.log(`⏰ Hours in Future: ${hoursInFuture.toFixed(2)}`);
+                    console.log(`🎯 Threshold: ${CONFIG.autoAcceptHoursInFuture} hours`);
+                    console.log(`✅ Auto-Accept: ${hoursInFuture >= CONFIG.autoAcceptHoursInFuture ? 'YES' : 'NO'}`);
+                    
+                    return hoursInFuture >= CONFIG.autoAcceptHoursInFuture;
+                });
+                
+                if (autoAcceptCandidates.length > 0) {
+                    console.log(`🚀 AUTO-ACCEPTING: Found ${autoAcceptCandidates.length} candidates`);
+                    
+                    // 🔄 PREVENT BROWSER CLOSING DURING AUTO-ACCEPT
+                    // Store the original browser and page to prevent them from being closed
+                    const originalBrowser = browser;
+                    const originalPage = page;
+                    
+                    for (const shift of autoAcceptCandidates) {
+                        console.log(`🚀 AUTO-ACCEPTING: Shift ${shift.id} - ${shift.title} at ${shift.school}`);
+                        
+                        // Ensure browser and page are still valid before accepting
+                        if (!originalBrowser || !originalPage || originalPage.isClosed()) {
+                            console.log(`❌ Browser session lost before accepting shift ${shift.id}`);
+                            continue;
+                        }
+                        
+                        // Pass browser and page directly to acceptJob function
+                        try {
+                            const result = await acceptJobWithSession(shift.id, originalBrowser, originalPage);
+                            if (result.success) {
+                                console.log(`✅ AUTO-ACCEPT SUCCESS: ${result.message}`);
+                            } else {
+                                console.log(`❌ AUTO-ACCEPT FAILED: ${result.message}`);
+                            }
+                        } catch (error) {
+                            console.error(`💥 AUTO-ACCEPT ERROR: Shift ${shift.id} - ${error.message}`);
+                        }
+                    }
+                    
+                    // 🔄 RESTORE BROWSER VARIABLES AFTER AUTO-ACCEPT
+                    browser = originalBrowser;
+                    page = originalPage;
+                }
+            }
         } else {
             console.log('No new shifts found');
+            // Update lastChecked timestamp even when no new shifts found
+            lastChecked = new Date();
+        }
+        
+        // Add a small delay to ensure checking status is visible in dashboard
+        if (CONFIG.checkInterval < 5000) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
     } catch (error) {
@@ -584,14 +703,48 @@ async function checkForShifts() {
         sessionCookies = null;
         lastLoginTime = null;
         
-        if (browser) {
+        // 🔄 ONLY CLOSE BROWSER IF NO AUTO-ACCEPT CANDIDATES
+        // Check if there are any auto-accept candidates that might be processing
+        // Use filteredShifts instead of newShifts since newShifts is not in scope here
+        const hasAutoAcceptCandidates = filteredShifts.some(shift => {
+            // Use the same robust date parsing as in the main auto-accept logic
+            let shiftDate;
+            try {
+                if (shift.foundAt) {
+                    shiftDate = new Date(shift.foundAt);
+                } else {
+                    shiftDate = new Date(shift.date);
+                }
+                
+                if (isNaN(shiftDate.getTime())) {
+                    return false;
+                }
+            } catch (error) {
+                return false;
+            }
+            
+            const now = new Date();
+            const hoursInFuture = (shiftDate - now) / (1000 * 60 * 60);
+            return CONFIG.autoAcceptEnabled && hoursInFuture >= CONFIG.autoAcceptHoursInFuture;
+        });
+        
+        if (browser && !hasAutoAcceptCandidates) {
+            console.log('🔄 No auto-accept candidates, closing browser session');
             try {
                 await browser.close();
+                console.log('✅ Browser closed successfully after error');
             } catch (closeError) {
                 console.log('Error closing browser after error:', closeError.message);
             }
             browser = null;
             page = null;
+            // Also clear global variables
+            global.browser = null;
+            global.page = null;
+        } else if (browser && hasAutoAcceptCandidates) {
+            console.log('🔄 Keeping browser session alive for potential auto-accept candidates');
+        } else {
+            console.log('ℹ️ No browser session to manage');
         }
     } finally {
         isChecking = false;
@@ -803,8 +956,8 @@ process.on('unhandledRejection', async (reason, promise) => {
     await sendErrorNotification(new Error(reason), "Unhandled Promise Rejection");
 });
 
-// API endpoint for Android app to get shifts
-app.get('/api/shifts', (req, res) => {
+// API endpoint for Android app to get shifts (enhanced version)
+app.get('/api/shifts/android', (req, res) => {
     res.json({
         success: true,
         shifts: availableShifts,

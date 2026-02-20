@@ -66,7 +66,7 @@
                 <li>✅ Automatically checks for new shifts every 1 minute</li>
                 <li>✅ Searches for Substitute Teacher positions in Fremont Unified</li>
                 <li>✅ Searches indefinitely into the future for all available positions</li>
-                <li>✅ Sends email notification to hkjagpal@hotmail.com when new shifts appear</li>
+                <li>✅ Sends email notification to kjagpal75@gmail.com when new shifts appear</li>
                 <li>✅ Dashboard refreshes automatically every 30 seconds</li>
             </ul>
         </div>
@@ -212,20 +212,43 @@
             }
 
             const button = document.getElementById('checkButton');
+            const originalText = button.textContent;
             button.disabled = true;
             button.textContent = 'Checking...';
+            
+            // Update status immediately
+            updateStatus(true);
 
             try {
-                await fetch('/api/check-now');
-                // Wait a bit then reload
-                setTimeout(loadShifts, 2000);
+                const response = await fetch('/api/check-now');
+                const result = await response.json();
+                
+                if (response.ok) {
+                    console.log('Check completed:', result);
+                    // Load shifts immediately after check completes
+                    await loadShifts();
+                } else {
+                    console.error('Check failed:', result);
+                    alert(`Check failed: ${result.error || result.message}`);
+                }
             } catch (error) {
                 console.error('Error triggering check:', error);
+                alert('Error triggering check. Please try again.');
             } finally {
-                setTimeout(() => {
-                    button.disabled = false;
-                    button.textContent = 'Check Now';
-                }, 3000);
+                updateStatus(false);
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
+
+        function updateStatus(checking) {
+            const statusEl = document.getElementById('status');
+            if (checking) {
+                statusEl.innerHTML = '<span class="inline-block w-2 h-2 bg-yellow-500 rounded-full animate-pulse"></span> Checking...';
+                isChecking = true;
+            } else {
+                statusEl.innerHTML = '<span class="inline-block w-2 h-2 bg-green-500 rounded-full"></span> Ready';
+                isChecking = false;
             }
         }
 
