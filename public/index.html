@@ -212,32 +212,25 @@
             }
 
             const button = document.getElementById('checkButton');
-            const originalText = button.textContent;
             button.disabled = true;
             button.textContent = 'Checking...';
-            
-            // Update status immediately
-            updateStatus(true);
 
             try {
-                const response = await fetch('/api/check-now');
-                const result = await response.json();
-                
-                if (response.ok) {
-                    console.log('Check completed:', result);
-                    // Load shifts immediately after check completes
-                    await loadShifts();
-                } else {
-                    console.error('Check failed:', result);
-                    alert(`Check failed: ${result.error || result.message}`);
-                }
+                await fetch('/api/check-now');
+                // Update status immediately to show checking state
+                updateStatus(true);
+                // Then reload shifts after a short delay to get results
+                setTimeout(() => {
+                    loadShifts();
+                }, 1000);
             } catch (error) {
                 console.error('Error triggering check:', error);
-                alert('Error triggering check. Please try again.');
-            } finally {
                 updateStatus(false);
-                button.disabled = false;
-                button.textContent = originalText;
+            } finally {
+                setTimeout(() => {
+                    button.disabled = false;
+                    button.textContent = 'Check Now';
+                }, 3000);
             }
         }
 

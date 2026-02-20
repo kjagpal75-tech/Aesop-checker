@@ -614,13 +614,27 @@ async function checkForShifts() {
                     // Calculate hours in future - handle date parsing more robustly
                     let shiftDate;
                     try {
-                        // Try to parse the shift date - handle various date formats
-                        if (shift.foundAt) {
-                            // Use the foundAt timestamp which is in ISO format
+                        // Try to parse the actual job date (not foundAt)
+                        if (shift.date) {
+                            // Handle multi-day date ranges like "3/31/2026 - 3/2/2026"
+                            if (shift.date.includes(' - ')) {
+                                // Extract the first date from the range
+                                const firstDateStr = shift.date.split(' - ')[0];
+                                shiftDate = new Date(firstDateStr);
+                                console.log(`🔧 AUTO-ACCEPT: Parsed first date from range: ${firstDateStr} -> ${shiftDate.toISOString()}`);
+                            } else {
+                                // Single date
+                                shiftDate = new Date(shift.date);
+                                console.log(`🔧 AUTO-ACCEPT: Parsed single date: ${shift.date} -> ${shiftDate.toISOString()}`);
+                            }
+                        } else if (shift.foundAt) {
+                            // Fallback to foundAt (when job was discovered)
                             shiftDate = new Date(shift.foundAt);
+                            console.log(`🔧 AUTO-ACCEPT: Using foundAt as fallback: ${shift.foundAt}`);
                         } else {
-                            // Fallback to parsing the date field
-                            shiftDate = new Date(shift.date);
+                            // No date available
+                            console.log(`❌ AUTO-ACCEPT: No date available for shift ${shift.id}`);
+                            return false;
                         }
                         
                         // If date is invalid, skip this shift
@@ -683,9 +697,12 @@ async function checkForShifts() {
             }
         } else {
             console.log('No new shifts found');
-            // Update lastChecked timestamp even when no new shifts found
-            lastChecked = new Date();
         }
+        
+        // IMPORTANT: Always update availableShifts with current available jobs
+        // This prevents showing stale jobs that are no longer available
+        availableShifts = [...filteredShifts];
+        lastChecked = new Date();
         
         // Add a small delay to ensure checking status is visible in dashboard
         if (CONFIG.checkInterval < 5000) {
