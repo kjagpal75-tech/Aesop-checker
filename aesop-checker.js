@@ -74,6 +74,12 @@ app.get('/api/check-now', async (req, res) => {
     try {
         // Wait for the check to complete
         await checkForShifts();
+        // Wait for page to load completely
+        await page.waitForTimeout(5000);
+            
+        // Wait additional time for dynamic content to load
+        console.log('Waiting for dynamic job loading...');
+        await page.waitForTimeout(3000);
         res.json({ 
             message: 'Check completed',
             lastChecked: lastChecked,
@@ -374,7 +380,15 @@ async function checkForShifts() {
             const afterLoginHtml = await page.content();
             console.log(`Page content length: ${afterLoginHtml ? afterLoginHtml.length : 0} characters`);
             
-            if (afterLoginHtml && afterLoginHtml.length > 1000) {
+            // Wait additional time for dynamic job loading after page content is captured
+            console.log('Waiting for dynamic job loading...');
+            await page.waitForTimeout(3000);
+            
+            // Get fresh page content after dynamic loading
+            const afterLoginHtmlUpdated = await page.content();
+            console.log(`Updated page content length: ${afterLoginHtmlUpdated ? afterLoginHtmlUpdated.length : 0} characters`);
+            
+            if (afterLoginHtmlUpdated && afterLoginHtmlUpdated.length > 1000) {
                 require('fs').writeFileSync('after-login.html', afterLoginHtml);
                 console.log('After-login HTML saved to after-login.html');
                 
@@ -402,12 +416,12 @@ async function checkForShifts() {
             console.error('Error saving after-login files:', saveError);
         }
 
-        // Extract jobs directly from the saved after-login.html file
+        // Extract jobs directly from updated after-login.html file
         console.log('Extracting jobs directly from after-login.html file...');
         
         let shifts = [];
         try {
-            // Read the after-login.html file directly
+            // Read after-login.html file directly (updated after dynamic loading)
             const fs = require('fs');
             const afterLoginHtml = fs.readFileSync('after-login.html', 'utf8');
             console.log('Read after-login.html file, length:', afterLoginHtml.length);
