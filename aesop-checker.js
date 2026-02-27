@@ -608,6 +608,16 @@ async function checkForShifts() {
         );
 
         console.log(`Found ${newShifts.length} new shifts`);
+        console.log(`🔍 NOTIFIED SHIFT IDs: ${Array.from(notifiedShiftIds).join(', ')}`);
+        console.log(`🔍 ALL SHIFT IDs: ${filteredShifts.map(s => s.id).join(', ')}`);
+        console.log(`🔍 NEW SHIFT IDS: ${newShifts.map(s => s.id).join(', ')}`);
+        
+        if (newShifts.length > 0) {
+            console.log('📋 NEW SHIFTS DETAILS:');
+            newShifts.forEach((shift, index) => {
+                console.log(`  ${index + 1}. ID ${shift.id} - ${shift.title} at ${shift.school} (${shift.date})`);
+            });
+        }
 
         if (newShifts.length > 0) {
             console.log('New shifts found:', newShifts);
@@ -676,6 +686,13 @@ async function checkForShifts() {
                 
                 if (autoAcceptCandidates.length > 0) {
                     console.log(`🚀 AUTO-ACCEPTING: Found ${autoAcceptCandidates.length} candidates`);
+                    autoAcceptCandidates.forEach((candidate, index) => {
+                        console.log(`🎯 CANDIDATE ${index + 1}: ID ${candidate.id} - ${candidate.title} at ${candidate.school}`);
+                    });
+                    
+                    // Log auto-accept trigger event
+                    console.log(`📧 AUTO-ACCEPT TRIGGERED: Will send notifications for ${autoAcceptCandidates.length} candidates`);
+                    console.log(`📧 Notification recipient: kjagpal75@gmail.com`);
                     
                     // 🔄 PREVENT BROWSER CLOSING DURING AUTO-ACCEPT
                     // Store the original browser and page to prevent them from being closed
@@ -693,14 +710,19 @@ async function checkForShifts() {
                         
                         // Pass browser and page directly to acceptJob function
                         try {
+                            console.log(`🔄 ATTEMPTING AUTO-ACCEPT: Shift ${shift.id}`);
                             const result = await acceptJobWithSession(shift.id, originalBrowser, originalPage);
+                            
                             if (result.success) {
                                 console.log(`✅ AUTO-ACCEPT SUCCESS: ${result.message}`);
+                                await sendAutoAcceptNotification(shift, 'SUCCESS', result.message);
                             } else {
                                 console.log(`❌ AUTO-ACCEPT FAILED: ${result.message}`);
+                                await sendAutoAcceptNotification(shift, 'FAILED', result.message);
                             }
                         } catch (error) {
                             console.error(`💥 AUTO-ACCEPT ERROR: Shift ${shift.id} - ${error.message}`);
+                            await sendAutoAcceptNotification(shift, 'ERROR', error.message);
                         }
                     }
                     
@@ -948,6 +970,75 @@ async function sendErrorNotification(error, context = "Unknown") {
         console.log('Error notification sent successfully!');
     } catch (emailError) {
         console.error('Error sending error notification:', emailError);
+    }
+}
+
+// Send auto-accept notification to kjagpal75@gmail.com
+async function sendAutoAcceptNotification(shift, status, message) {
+    console.log(`📧 Sending auto-accept notification: ${shift.id} - ${status}`);
+    
+    if (!transporter) {
+        console.log('Email transporter not configured, skipping auto-accept notification');
+        return;
+    }
+
+    const statusEmoji = status === 'SUCCESS' ? '✅' : status === 'FAILED' ? '❌' : '💥';
+    const statusColor = status === 'SUCCESS' ? '#28a745' : status === 'FAILED' ? '#dc3545' : '#fd7e14';
+    
+    const mailOptions = {
+        from: CONFIG.emailFrom,
+        to: 'kjagpal75@gmail.com',  // Send specifically to kjagpal75@gmail.com
+        subject: `🤖 Auto-Accept ${status}: ${shift.title} at ${shift.school}`,
+        html: `
+            <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+                <div style="background: ${statusColor}; color: white; padding: 20px; text-align: center;">
+                    <h1>${statusEmoji} Auto-Accept ${status}</h1>
+                    <p style="font-size: 18px; margin: 10px 0;">Aesop Shift Checker</p>
+                </div>
+                
+                <div style="padding: 20px; background: #f8f9fa;">
+                    <h2>Job Details:</h2>
+                    <ul style="list-style: none; padding: 0;">
+                        <li><strong>Job ID:</strong> ${shift.id}</li>
+                        <li><strong>Position:</strong> ${shift.title}</li>
+                        <li><strong>School:</strong> ${shift.school}</li>
+                        <li><strong>Date:</strong> ${shift.date}</li>
+                        <li><strong>Time:</strong> ${shift.time}</li>
+                        <li><strong>Duration:</strong> ${shift.duration}</li>
+                        <li><strong>Employee:</strong> ${shift.employee}</li>
+                    </ul>
+                </div>
+                
+                <div style="padding: 20px; background: white;">
+                    <h2>Auto-Accept Result:</h2>
+                    <div style="background: ${statusColor}20; border-left: 4px solid ${statusColor}; padding: 15px; margin: 10px 0;">
+                        <p style="margin: 0; font-weight: bold;">${statusEmoji} ${status}</p>
+                        <p style="margin: 5px 0; color: #666;">${message}</p>
+                    </div>
+                </div>
+                
+                <div style="padding: 20px; background: #e9ecef;">
+                    <h3>Timestamp Information:</h3>
+                    <ul style="list-style: none; padding: 0;">
+                        <li><strong>Auto-Accept Attempt:</strong> ${new Date().toLocaleString()}</li>
+                        <li><strong>Job Found:</strong> ${new Date(shift.foundAt).toLocaleString()}</li>
+                        <li><strong>Hours in Future:</strong> ${((new Date(shift.date) - new Date()) / (1000 * 60 * 60)).toFixed(2)} hours</li>
+                    </ul>
+                </div>
+                
+                <div style="background: #333; color: white; padding: 15px; text-align: center; font-size: 12px;">
+                    <p>Aesop Shift Checker - Auto-Accept Monitoring</p>
+                    <p>Server Time: ${new Date().toLocaleString()}</p>
+                </div>
+            </div>
+        `
+    };
+
+    try {
+        await transporter.sendMail(mailOptions);
+        console.log(`✅ Auto-accept notification sent successfully: ${status}`);
+    } catch (emailError) {
+        console.error('❌ Error sending auto-accept notification:', emailError);
     }
 }
 
