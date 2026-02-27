@@ -382,7 +382,7 @@ async function checkForShifts() {
             
             // Wait additional time for dynamic job loading after page content is captured
             console.log('Waiting for dynamic job loading...');
-            await page.waitForTimeout(3000);
+            await new Promise(resolve => setTimeout(resolve, 3000));
             
             // Get fresh page content after dynamic loading
             const afterLoginHtmlUpdated = await page.content();
