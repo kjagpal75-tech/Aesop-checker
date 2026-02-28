@@ -35,6 +35,18 @@ module.exports = {
     autoAcceptHoursInFuture: parseInt(process.env.AUTO_ACCEPT_HOURS_IN_FUTURE) || 48, // Auto-accept jobs X+ hours in future
     autoAcceptLogOnly: process.env.AUTO_ACCEPT_LOG_ONLY === 'true', // Log only mode (don't actually accept)
     
+    // Auto-Accept School Filter - Only accept jobs from these schools
+    autoAcceptSchools: process.env.AUTO_ACCEPT_SCHOOLS ? 
+        process.env.AUTO_ACCEPT_SCHOOLS.split(',').map(s => s.trim().toUpperCase()) : [
+            'WASHINGTON HIGH SCHOOL',
+            'AMERICAN HIGH SCHOOL', 
+            'HORNER MIDDLE SCHOOL',
+            'HOPKINS MIDDLE SCHOOL',
+            'KENNEDY HIGH SCHOOL',
+            'MISSION SAN JOSE HIGH SCHOOL',
+            'IRVINGTON HIGH SCHOOL'
+        ],
+    
     position: process.env.POSITION || 'Substitute Teacher',
     district: process.env.DISTRICT || 'Fremont Unified School District'
 };

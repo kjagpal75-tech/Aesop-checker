@@ -635,6 +635,21 @@ async function checkForShifts() {
             // AUTO-ACCEPT: Check for jobs that meet auto-accept criteria
             if (CONFIG.autoAcceptEnabled) {
                 const autoAcceptCandidates = newShifts.filter(shift => {
+                    // 🏫 SCHOOL FILTER: Check if school is in allowed list
+                    const schoolName = shift.school ? shift.school.trim().toUpperCase() : '';
+                    const allowedSchools = CONFIG.autoAcceptSchools.map(s => s.toUpperCase());
+                    
+                    console.log(`🏫 SCHOOL FILTER: Checking "${schoolName}" against allowed schools`);
+                    console.log(`📋 ALLOWED SCHOOLS: ${allowedSchools.join(', ')}`);
+                    
+                    if (!allowedSchools.includes(schoolName)) {
+                        console.log(`❌ SCHOOL FILTER: REJECTED - "${schoolName}" not in allowed list`);
+                        console.log(`💡 This job will NOT be auto-accepted`);
+                        return false;
+                    }
+                    
+                    console.log(`✅ SCHOOL FILTER: APPROVED - "${schoolName}" is in allowed list`);
+                    
                     // Calculate hours in future - handle date parsing more robustly
                     let shiftDate;
                     try {
