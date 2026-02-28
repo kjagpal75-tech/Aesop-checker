@@ -755,6 +755,9 @@ async function checkForShifts() {
         availableShifts = [...filteredShifts];
         lastChecked = new Date();
         
+        console.log(`📊 DASHBOARD UPDATE: ${filteredShifts.length} current available jobs`);
+        console.log(`📋 AVAILABLE JOB IDS: ${filteredShifts.map(s => s.id).join(', ')}`);
+        
         // Add a small delay to ensure checking status is visible in dashboard
         if (CONFIG.checkInterval < 5000) {
             await new Promise(resolve => setTimeout(resolve, 2000));
