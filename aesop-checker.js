@@ -348,15 +348,28 @@ async function loginAndMaintainSession() {
     return { browser, page };
 }
 
+// Safe logging function to prevent EIO errors
+function safeLog(message) {
+    try {
+        console.log(message);
+    } catch (error) {
+        // Silently handle logging errors to prevent crashes
+        if (error.code !== 'EIO') {
+            // Only re-throw if it's not an EIO error
+            throw error;
+        }
+    }
+}
+
 // Function to check for shifts
 async function checkForShifts() {
     if (isChecking) {
-        console.log('Check already in progress, skipping...');
+        safeLog('Check already in progress, skipping...');
         return;
     }
 
     isChecking = true;
-    console.log(`[${new Date().toLocaleString()}] Checking for shifts...`);
+    safeLog(`[${new Date().toLocaleString()}] Checking for shifts...`);
 
     // Validate required configuration
     if (!CONFIG.username || !CONFIG.password) {
@@ -1243,6 +1256,24 @@ app.get('/health/detailed', (req, res) => {
     };
     
     res.json(health);
+});
+
+// Global error handler for EIO and other errors
+process.on('uncaughtException', (error) => {
+    if (error.code === 'EIO') {
+        console.error('EIO Error caught and handled - logging issue detected');
+        return; // Don't crash the process
+    }
+    console.error('Uncaught Exception:', error);
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    if (reason && reason.code === 'EIO') {
+        console.error('EIO Error in promise caught and handled - logging issue detected');
+        return; // Don't crash the process
+    }
+    console.error('Unhandled Rejection at:', promise, 'reason:', reason);
 });
 
 // Start the Express server
