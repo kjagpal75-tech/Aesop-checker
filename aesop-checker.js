@@ -650,6 +650,13 @@ async function checkForShifts() {
                 const autoAcceptCandidates = newShifts.filter(shift => {
                     // 🏫 SCHOOL FILTER: Check if school is in allowed list
                     const schoolName = shift.school ? shift.school.trim().toUpperCase() : '';
+                    
+                    // Fix TypeError: Ensure CONFIG.autoAcceptSchools is defined
+                    if (!CONFIG.autoAcceptSchools || !Array.isArray(CONFIG.autoAcceptSchools)) {
+                        console.log('❌ AUTO-ACCEPT: CONFIG.autoAcceptSchools is not defined or not an array');
+                        return false;
+                    }
+                    
                     const allowedSchools = CONFIG.autoAcceptSchools.map(s => s.toUpperCase());
                     
                     console.log(`🏫 SCHOOL FILTER: Checking "${schoolName}" against allowed schools`);
