@@ -643,7 +643,11 @@ async function checkForShifts() {
             lastChecked = new Date();
             
             // Send email notification
+            console.log(`📧 SENDING EMAIL at ${new Date().toISOString()} for ${newShifts.length} new job${newShifts.length > 1 ? 's' : ''}`);
+            const emailStartTime = Date.now();
             await sendEmailNotification(newShifts);
+            const emailEndTime = Date.now();
+            console.log(`📧 EMAIL SENT at ${new Date().toISOString()} (${emailEndTime - emailStartTime}ms)`);
             
             // AUTO-ACCEPT: Check for jobs that meet auto-accept criteria
             if (CONFIG.autoAcceptEnabled) {
@@ -867,12 +871,8 @@ async function sendEmailNotification(shifts) {
         return;
     }
 
-    // Test email configuration before sending
-    const isConfigValid = await testEmailConfiguration();
-    if (!isConfigValid) {
-        console.log('Email configuration is invalid - skipping notification');
-        return;
-    }
+    // Email configuration is tested on startup - no need to test before each send
+    // This removes 5-10 second delay from each email notification
 
     const shiftsHtml = shifts.map(shift => `
         <div style="border: 1px solid #ddd; padding: 20px; margin: 15px 0; border-radius: 8px; background-color: #f9f9f9;">
@@ -943,9 +943,11 @@ async function sendEmailNotification(shifts) {
 
     try {
         await transporter.sendMail(mailOptions);
-        console.log('Email notification sent successfully!');
+        console.log('✅ Email notification sent successfully!');
     } catch (error) {
-        console.error('Error sending email:', error);
+        console.error('❌ EMAIL SEND FAILED:', error.message);
+        console.error('❌ Full error details:', error);
+        // Don't throw error - continue with auto-accept even if email fails
     }
 }
 
