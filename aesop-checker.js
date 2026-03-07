@@ -487,8 +487,22 @@ async function checkForShifts() {
                                 if (job.Items && job.Items.length > 0) {
                                     // Parse the Items array to get individual shifts
                                     const items = job.Items;
-                                    const firstShift = items[items.length - 1]; // Last item is first day
-                                    const lastShift = items[0]; // First item is last day
+                                    
+                                    // Sort items by Start date to ensure correct chronological order
+                                    // This fixes inverted date ranges like "3/11/26 - 3/9/26"
+                                    const sortedItems = [...items].sort((a, b) => 
+                                        new Date(a.Start) - new Date(b.Start)
+                                    );
+                                    
+                                    const firstShift = sortedItems[0];  // Earliest date (first day)
+                                    const lastShift = sortedItems[sortedItems.length - 1];  // Latest date (last day)
+                                    
+                                    // Log if we're fixing an inverted date range
+                                    const originalOrder = items.map(i => new Date(i.Start).toLocaleDateString()).join(', ');
+                                    const sortedOrder = sortedItems.map(i => new Date(i.Start).toLocaleDateString()).join(', ');
+                                    if (originalOrder !== sortedOrder) {
+                                        console.log(`🔧 DATE RANGE FIX: Corrected inverted dates from "${originalOrder}" to "${sortedOrder}"`);
+                                    }
                                     
                                     const firstDate = new Date(firstShift.Start);
                                     const lastDate = new Date(lastShift.Start);
