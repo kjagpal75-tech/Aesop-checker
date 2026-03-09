@@ -903,7 +903,7 @@ async function sendEmailNotification(shifts) {
             </div>
             ${shift.duration && shift.duration !== 'N/A' ? `<p style="margin: 5px 0;"><strong style="color: #333;">⏱️ Duration:</strong> ${shift.duration}</p>` : ''}
             <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
-                <a href="http://localhost:3000/api/accept-job/${shift.id}" style="background-color: #28a745; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-right: 10px;">✅ Accept Job</a>
+                <a href="${CONFIG.publicUrl}/api/accept-job/${shift.id}" style="background-color: #28a745; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold; margin-right: 10px;">✅ Accept Job</a>
                 <a href="${CONFIG.aesopUrl}" style="background-color: #6c757d; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">🔍 View in Aesop</a>
             </div>
             <p style="margin: 10px 0 0 0; font-size: 12px; color: #666; font-style: italic;">
@@ -941,7 +941,7 @@ async function sendEmailNotification(shifts) {
                             <strong>Quick Links:</strong>
                         </p>
                         <div style="display: flex; gap: 10px; justify-content: center; flex-wrap: wrap;">
-                            <a href="http://localhost:3000" style="background-color: #007bff; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">📊 Dashboard</a>
+                            <a href="${CONFIG.publicUrl}" style="background-color: #007bff; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">📊 Dashboard</a>
                             <a href="${CONFIG.aesopUrl}" style="background-color: #28a745; color: white; padding: 12px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">🔐 Login to Aesop</a>
                         </div>
                     </div>
@@ -1302,7 +1302,7 @@ process.on('unhandledRejection', (reason, promise) => {
 // Start the Express server
 const PORT = 3000;
 app.listen(PORT, async () => {
-    console.log(`Dashboard available at http://localhost:${PORT}`);
+    console.log(`Dashboard available at ${CONFIG.publicUrl}`);
     console.log(`Checking for shifts every ${CONFIG.checkInterval / 60000} minutes`);
     
     // Test email configuration on startup
