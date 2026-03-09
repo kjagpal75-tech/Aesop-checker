@@ -77,7 +77,9 @@
 
         async function loadShifts() {
             try {
-                const response = await fetch('/api/shifts');
+                // Add cache-busting timestamp to prevent stale data
+                const timestamp = Date.now();
+                const response = await fetch(`/api/shifts?t=${timestamp}`);
                 const data = await response.json();
 
                 // Update last checked

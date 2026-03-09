@@ -59,10 +59,37 @@ const app = express();
 app.use(express.static('public'));
 
 app.get('/api/shifts', (req, res) => {
+    // Add cache-busting headers to prevent stale data
+    res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'Access-Control-Allow-Origin': '*'
+    });
+    
+    console.log(`🔍 API CALLED: Returning ${availableShifts.length} jobs from availableShifts array`);
+    console.log(`🔍 API CONTENT: ${availableShifts.map(s => `${s.id}-${s.school}`).join(', ')}`);
+    
     res.json({
         shifts: availableShifts,
         lastChecked: lastChecked,
         isChecking: isChecking
+    });
+});
+
+// Debug endpoint to check raw availableShifts array
+app.get('/api/debug', (req, res) => {
+    res.set({
+        'Cache-Control': 'no-cache, no-store, must-revalidate',
+        'Access-Control-Allow-Origin': '*'
+    });
+    
+    res.json({
+        availableShiftsLength: availableShifts.length,
+        availableShifts: availableShifts,
+        lastChecked: lastChecked,
+        isChecking: isChecking,
+        timestamp: new Date().toISOString()
     });
 });
 
@@ -364,11 +391,18 @@ function safeLog(message) {
 // Function to check for shifts
 async function checkForShifts() {
     if (isChecking) {
-        safeLog('Check already in progress, skipping...');
+        console.log('Check already in progress, skipping...');
         return;
     }
 
     isChecking = true;
+    
+    // CRITICAL: Clear stale data immediately to prevent showing old jobs
+    console.log(`🗑️ CLEARING STALE DATA: Removing ${availableShifts.length} old jobs from dashboard`);
+    console.log(`🗑️ OLD JOBS: ${availableShifts.map(s => `${s.id}-${s.school}`).join(', ')}`);
+    availableShifts.length = 0;
+    availableShifts = [];
+    
     safeLog(`[${new Date().toLocaleString()}] Checking for shifts...`);
 
     // Validate required configuration
@@ -429,193 +463,115 @@ async function checkForShifts() {
             console.error('Error saving after-login files:', saveError);
         }
 
-        // Extract jobs directly from updated after-login.html file
-        console.log('Extracting jobs directly from after-login.html file...');
+        // Helper function to extract job data from job object
+function extractJobData(job) {
+    // Only process jobs with SubstituteId: null (available jobs)
+    if (job.SubstituteId !== null) {
+        console.log(`❌ SKIPPING JOB - Already has substitute assigned: ${job.SubstituteId}`);
+        return null;
+    }
+    
+    console.log(`Processing available job: ${job.WorkerTitle}`);
+    
+    // Format date and time using Items array or Start/EndDate
+    let dateStr = 'N/A';
+    let timeStr = 'N/A';
+    
+    if (job.Items && job.Items.length > 0) {
+        // Parse the Items array to get individual shifts
+        const items = job.Items;
+        
+        // Sort items by Start date to ensure correct chronological order
+        const sortedItems = [...items].sort((a, b) => 
+            new Date(a.Start) - new Date(b.Start)
+        );
+        
+        const firstShift = sortedItems[0];
+        const lastShift = sortedItems[sortedItems.length - 1];
+        
+        const firstDate = new Date(firstShift.Start);
+        const lastDate = new Date(lastShift.Start);
+        
+        // Check if it's a multi-day range
+        if (firstDate.toDateString() !== lastDate.toDateString()) {
+            dateStr = `${firstDate.toLocaleDateString()} - ${lastDate.toLocaleDateString()}`;
+        } else {
+            dateStr = firstDate.toLocaleDateString();
+        }
+        
+        // Get time range from first and last shifts
+        const firstTime = new Date(firstShift.Start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const lastTime = new Date(lastShift.End).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        timeStr = `${firstTime} - ${lastTime}`;
+        
+    } else if (job.Start && job.EndDate) {
+        // Fallback to Start/EndDate fields
+        const startDate = new Date(job.Start);
+        const endDate = new Date(job.EndDate);
+        
+        if (startDate.toDateString() !== endDate.toDateString()) {
+            dateStr = `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
+        } else {
+            dateStr = startDate.toLocaleDateString();
+        }
+        
+        const startTime = startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        const endTime = endDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
+        timeStr = `${startTime} - ${endTime}`;
+    }
+    
+    return {
+        id: job.Id,
+        title: job.WorkerTitle,
+        employee: `${job.WorkerFirstName} ${job.WorkerLastName}`.trim(),
+        school: job.Items && job.Items[0] ? job.Items[0].Institution.Name : 'See details in Aesop',
+        date: dateStr,
+        time: timeStr,
+        duration: job.Items && job.Items[0] ? job.Items[0].Duration.substring(0, 5) : 'N/A',
+        foundAt: new Date().toISOString()
+    };
+}
+
+// Extract jobs directly from live page (always fresh data)
+        console.log('Extracting jobs from live page...');
         
         let shifts = [];
+        
         try {
-            // Read after-login.html file directly (updated after dynamic loading)
-            const fs = require('fs');
-            const afterLoginHtml = fs.readFileSync('after-login.html', 'utf8');
-            console.log('Read after-login.html file, length:', afterLoginHtml.length);
-            
-            // Parse the pageVars object to get availJobs
-            const pageVarsMatch = afterLoginHtml.match(/var pageVars = ({[\s\S]*?});/);
-            console.log(`pageVars match: ${!!pageVarsMatch}`);
-            
-            if (pageVarsMatch) {
-                try {
-                    // Extract just the object part, removing "var pageVars = " and trailing ";"
-                    const pageVarsText = pageVarsMatch[0].replace(/^var pageVars = /, '').replace(/;$/, '');
-                    console.log(`pageVars text length: ${pageVarsText.length}`);
-                    console.log(`pageVars text preview: ${pageVarsText.substring(0, 500)}...`);
-                    
-                    // Use Function constructor instead of eval for better security
+            // Always scrape live page for fresh data
+            if (page && !page.isClosed()) {
+                console.log(' SCRAPING LIVE PAGE for current job data...');
+                const livePageContent = await page.content();
+                
+                // Parse the live page content
+                const livePageVarsMatch = livePageContent.match(/var pageVars = ({[\s\S]*?});/);
+                if (livePageVarsMatch) {
+                    const pageVarsText = livePageVarsMatch[0].replace(/^var pageVars = /, '').replace(/;$/, '');
                     const pageVars = new Function(`return ${pageVarsText}`)();
                     
-                    console.log(`pageVars keys:`, Object.keys(pageVars));
-                    console.log(`pageVars.availJobs: ${!!pageVars.availJobs}`);
-                    if (pageVars.availJobs) {
-                        console.log(`pageVars.availJobs keys:`, Object.keys(pageVars.availJobs));
-                        console.log(`pageVars.availJobs.list: ${!!pageVars.availJobs.list}`);
-                        console.log(`pageVars.availJobs.fromDb: ${pageVars.availJobs.fromDb}`);
-                    }
-                    
                     if (pageVars && pageVars.availJobs && pageVars.availJobs.list) {
-                        console.log(`Found ${pageVars.availJobs.list.length} available jobs in pageVars.availJobs.list`);
+                        console.log(` LIVE DATA: Found ${pageVars.availJobs.list.length} jobs from live page`);
                         
                         for (const job of pageVars.availJobs.list) {
-                            console.log(`\n--- Processing job from pageVars.availJobs.list ---`);
-                            console.log(`Job ID: ${job.Id}`);
-                            console.log(`Title: ${job.WorkerTitle}`);
-                            console.log(`Employee: ${job.WorkerFirstName} ${job.WorkerLastName}`);
-                            console.log(`School: ${job.Items && job.Items[0] ? job.Items[0].Institution.Name : 'N/A'}`);
-                            console.log(`Start: ${job.Start}`);
-                            console.log(`EndDate: ${job.EndDate}`);
-                            console.log(`Items count: ${job.Items ? job.Items.length : 0}`);
-                            console.log(`SubstituteId: ${job.SubstituteId}`);
-                            
-                            // Only process jobs with SubstituteId: null (available jobs)
-                            if (job.SubstituteId === null) {
-                                // Accept all available jobs - no position filtering needed
-                                console.log(`Processing available job: ${job.WorkerTitle}`);
-                                
-                                // Format date and time using Items array or Start/EndDate
-                                let dateStr = 'N/A';
-                                let timeStr = 'N/A';
-                                
-                                if (job.Items && job.Items.length > 0) {
-                                    // Parse the Items array to get individual shifts
-                                    const items = job.Items;
-                                    
-                                    // Sort items by Start date to ensure correct chronological order
-                                    // This fixes inverted date ranges like "3/11/26 - 3/9/26"
-                                    const sortedItems = [...items].sort((a, b) => 
-                                        new Date(a.Start) - new Date(b.Start)
-                                    );
-                                    
-                                    const firstShift = sortedItems[0];  // Earliest date (first day)
-                                    const lastShift = sortedItems[sortedItems.length - 1];  // Latest date (last day)
-                                    
-                                    // Log if we're fixing an inverted date range
-                                    const originalOrder = items.map(i => new Date(i.Start).toLocaleDateString()).join(', ');
-                                    const sortedOrder = sortedItems.map(i => new Date(i.Start).toLocaleDateString()).join(', ');
-                                    if (originalOrder !== sortedOrder) {
-                                        console.log(`🔧 DATE RANGE FIX: Corrected inverted dates from "${originalOrder}" to "${sortedOrder}"`);
-                                    }
-                                    
-                                    const firstDate = new Date(firstShift.Start);
-                                    const lastDate = new Date(lastShift.Start);
-                                    
-                                    // Check if it's a multi-day range
-                                    if (firstDate.toDateString() !== lastDate.toDateString()) {
-                                        dateStr = `${firstDate.toLocaleDateString()} - ${lastDate.toLocaleDateString()}`;
-                                        console.log(`Using date range from Items: ${dateStr}`);
-                                    } else {
-                                        // Single day
-                                        dateStr = firstDate.toLocaleDateString();
-                                        console.log(`Using single date from Items: ${dateStr}`);
-                                    }
-                                    
-                                    // Get time range from first and last shifts
-                                    const firstTime = new Date(firstShift.Start).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                    const lastTime = new Date(lastShift.End).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                    timeStr = `${firstTime} - ${lastTime}`;
-                                    
-                                } else if (job.Start && job.EndDate) {
-                                    // Fallback to Start/EndDate fields
-                                    const startDate = new Date(job.Start);
-                                    const endDate = new Date(job.EndDate);
-                                    
-                                    if (startDate.toDateString() !== endDate.toDateString()) {
-                                        dateStr = `${startDate.toLocaleDateString()} - ${endDate.toLocaleDateString()}`;
-                                        console.log(`Using date range from Start/EndDate: ${dateStr}`);
-                                    } else {
-                                        dateStr = startDate.toLocaleDateString();
-                                        console.log(`Using single date from Start: ${dateStr}`);
-                                    }
-                                    
-                                    const startTime = startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                    const endTime = endDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'});
-                                    timeStr = `${startTime} - ${endTime}`;
-                                }
-                                
-                                const shiftData = {
-                                    id: job.Id,
-                                    title: job.WorkerTitle,
-                                    employee: `${job.WorkerFirstName} ${job.WorkerLastName}`.trim(),
-                                    school: job.Items && job.Items[0] ? job.Items[0].Institution.Name : 'See details in Aesop',
-                                    date: dateStr,
-                                    time: timeStr,
-                                    duration: job.Items && job.Items[0] ? job.Items[0].Duration.substring(0, 5) : 'N/A',
-                                    foundAt: new Date().toISOString()
-                                };
-                                
-                                console.log(`✅ ADDING JOB: ${job.WorkerTitle} at ${shiftData.school}`);
-                                shifts.push(shiftData);
-                            } else {
-                                console.log(`❌ SKIPPING JOB - Already has substitute assigned: ${job.SubstituteId}`);
+                            // Use the helper function to extract job data
+                            const jobData = extractJobData(job);
+                            if (jobData) {
+                                console.log(` ADDING JOB: ${job.WorkerTitle} at ${jobData.school}`);
+                                shifts.push(jobData);
                             }
                         }
                     } else {
-                        console.log('No availJobs.list found in pageVars');
+                        console.log('No availJobs.list found in live pageVars');
                     }
-                } catch (parseError) {
-                    console.log('Error parsing pageVars with eval:', parseError.message);
-                    console.log('Parse error details:', parseError.stack);
-                    
-                    // Try to extract availJobs using regex as fallback
-                    console.log('Trying regex fallback for availJobs...');
-                    const availJobsRegex = /"availJobs":\{[^}]*"list":\s*\[([^\]]+)\]/;
-                    const availJobsMatch = afterLoginHtml.match(availJobsRegex);
-                    
-                    if (availJobsMatch) {
-                        console.log('Found availJobs with regex, parsing manually...');
-                        const availJobsText = `[${availJobsMatch[1]}]`;
-                        try {
-                            const availJobs = JSON.parse(availJobsText);
-                            console.log(`Found ${availJobs.length} jobs with regex fallback`);
-                            
-                            for (const job of availJobs) {
-                                // Process each job...
-                                if (job.SubstituteId === null) {
-                                    // Add job processing logic here
-                                    console.log(`Found available job: ${job.Id} - ${job.WorkerTitle}`);
-                                    // ... rest of job processing
-                                }
-                            }
-                        } catch (regexError) {
-                            console.log('Regex fallback also failed:', regexError.message);
-                        }
-                    }
+                } else {
+                    console.log('No pageVars object found in live page');
                 }
             } else {
-                console.log('No pageVars object found in HTML');
-                
-                // Try alternative search for pageVars
-                const altPageVarsMatch = afterLoginHtml.match(/pageVars\s*=\s*{[\s\S]*?}/);
-                if (altPageVarsMatch) {
-                    console.log('Found alternative pageVars match');
-                    console.log('Alternative pageVars preview:', altPageVarsMatch[0].substring(0, 200));
-                }
-                
-                // Try searching for curJobs
-                const curJobsMatch = afterLoginHtml.match(/curJobs:\s*\[([^\]]+)\]/);
-                if (curJobsMatch) {
-                    console.log('Found curJobs array');
-                    console.log('curJobs preview:', curJobsMatch[1].substring(0, 200));
-                }
-                
-                // Try searching for availJobs
-                const availJobsMatch = afterLoginHtml.match(/availJobs:\s*\{[^}]*list:\s*\[([^\]]+)\]/);
-                if (availJobsMatch) {
-                    console.log('Found availJobs object');
-                    console.log('availJobs preview:', availJobsMatch[0].substring(0, 200));
-                }
+                console.error(' Cannot scrape live page - page is closed or not available');
             }
             
-        } catch (fileError) {
-            console.error('Error reading after-login.html file:', fileError);
+        } catch (liveError) {
+            console.error('Error scraping live page:', liveError);
         }
 
         console.log(`Found ${shifts.length} potential shifts`);
@@ -790,11 +746,17 @@ async function checkForShifts() {
         
         // IMPORTANT: Always update availableShifts with current available jobs
         // This prevents showing stale jobs that are no longer available
+        console.log(`🔄 UPDATING DASHBOARD: Old jobs: ${availableShifts.length}, New jobs: ${filteredShifts.length}`);
+        console.log(`🗑️ CLEARING old job data: ${availableShifts.map(s => `${s.id}-${s.school}`).join(', ')}`);
+        
+        // Force clear the array first
+        availableShifts.length = 0;
         availableShifts = [...filteredShifts];
         lastChecked = new Date();
         
         console.log(`📊 DASHBOARD UPDATE: ${filteredShifts.length} current available jobs`);
         console.log(`📋 AVAILABLE JOB IDS: ${filteredShifts.map(s => s.id).join(', ')}`);
+        console.log(`🏫 SCHOOLS: ${filteredShifts.map(s => s.school).join(', ')}`);
         
         // Add a small delay to ensure checking status is visible in dashboard
         if (CONFIG.checkInterval < 5000) {
