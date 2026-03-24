@@ -17,8 +17,8 @@ Browser (HTTPS) → Nginx (SSL Termination) → Node.js App (HTTP)
 ## Current Configuration
 
 ### URLs
-- **HTTPS**: `https://34.71.197.190` (primary)
-- **HTTP**: `http://34.71.197.190` (auto-redirects to HTTPS)
+- **HTTPS**: `https://34.71.197.190` (primary and only)
+- **HTTP**: `http://34.71.197.190` (disabled for security)
 - **Direct App**: `http://34.71.197.190:3000` (still accessible)
 
 ### SSL Certificate
@@ -28,11 +28,11 @@ Browser (HTTPS) → Nginx (SSL Termination) → Node.js App (HTTP)
 - **Subject**: CN=aesop-server
 
 ### Security Features
-- ✅ **Automatic HTTP to HTTPS redirect**
+- ✅ **HTTPS-only access** (HTTP disabled for security)
 - ✅ **SSL/TLS hardening** (TLS 1.2+ only)
 - ✅ **Security headers** (HSTS, XSS protection, frame options)
 - ✅ **Reverse proxy** with proper headers
-- ✅ **Firewall rules** for ports 80/443
+- ✅ **Firewall rules** for HTTPS only (port 443)
 
 ## Setup Instructions
 
@@ -77,7 +77,8 @@ sudo systemctl restart nginx
 
 #### Update Firewall
 ```bash
-gcloud compute firewall-rules update default-allow-http --allow tcp:80,tcp:3000
+gcloud compute firewall-rules update default-allow-http --allow tcp:3000
+# Note: Port 80 (HTTP) is disabled for security
 ```
 
 #### Update App Configuration
@@ -97,13 +98,12 @@ curl -k -I https://34.71.197.190
 # Expected: HTTP/2 200
 ```
 
-### Test HTTP Redirect
+### Test HTTP Access (Should Be Blocked)
 ```bash
-# Test HTTP to HTTPS redirect
-curl -I http://34.71.197.190
+# Test HTTP (should timeout or be blocked)
+curl -I http://34.71.197.190 --max-time 5
 
-# Expected: HTTP/1.1 301 Moved Permanently
-# Location: https://34.71.197.190/
+# Expected: Connection timeout or refused
 ```
 
 ### Test from Server

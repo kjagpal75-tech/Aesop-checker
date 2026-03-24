@@ -10,9 +10,9 @@ echo "🔒 Deploying SSL/HTTPS Setup..."
 echo "📋 SSL Setup Summary:"
 echo "  - Self-signed SSL certificate (1 year validity)"
 echo "  - Nginx reverse proxy with SSL termination"
-echo "  - HTTP to HTTPS automatic redirect"
+echo "  - HTTPS-only access (HTTP disabled for security)"
 echo "  - Security headers and SSL hardening"
-echo "  - Firewall rules updated for ports 80/443"
+echo "  - Firewall rules updated for HTTPS only (port 443)"
 echo ""
 
 # Check if Nginx is installed
@@ -51,8 +51,8 @@ echo "🔄 Restarting Nginx..."
 gcloud compute ssh aesop-server --command "sudo systemctl restart nginx"
 
 # Update firewall rules
-echo "🔥 Updating firewall rules..."
-gcloud compute firewall-rules update default-allow-http --allow tcp:80,tcp:3000
+echo "🔥 Updating firewall rules (HTTPS only)..."
+gcloud compute firewall-rules update default-allow-http --allow tcp:3000
 
 # Update app configuration
 echo "⚙️ Updating app configuration for HTTPS..."
@@ -79,16 +79,17 @@ echo "Testing HTTPS access..."
 HTTPS_STATUS=$(curl -k -s -o /dev/null -w '%{http_code}' https://34.71.197.190)
 echo "  HTTPS Status: $HTTPS_STATUS"
 
-echo "Testing HTTP to HTTPS redirect..."
-REDIRECT_STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://34.71.197.190)
-echo "  HTTP Redirect Status: $REDIRECT_STATUS"
+echo "Testing HTTP access (should be blocked)..."
+HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://34.71.197.190 --max-time 5 || echo "TIMEOUT")
+echo "  HTTP Status: $HTTP_STATUS (should be TIMEOUT or blocked)"
 
 echo ""
 echo "✅ SSL/HTTPS Setup Completed!"
 echo ""
 echo "🌐 Access URLs:"
-echo "  🔒 HTTPS: https://34.71.197.190"
-echo "  🔄 HTTP (redirects to HTTPS): http://34.71.197.190"
+echo "  🔒 HTTPS: https://34.71.197.190 (ONLY)"
+echo "  � HTTP: http://34.71.197.190 (DISABLED)"
+echo "  📱 Direct App: http://34.71.197.190:3000 (still accessible)"
 echo ""
 echo "📋 SSL Certificate Info:"
 echo "  📅 Validity: 1 year (self-signed)"
@@ -96,10 +97,11 @@ echo "  🔐 Algorithm: RSA 2048-bit"
 echo "  🖥️ Subject: CN=aesop-server"
 echo ""
 echo "🔧 Security Features:"
-echo "  ✅ Automatic HTTP to HTTPS redirect"
+echo "  ✅ HTTPS-only access (HTTP disabled)"
 echo "  ✅ SSL/TLS hardening (TLS 1.2+)"
 echo "  ✅ Security headers (HSTS, XSS protection, etc.)"
 echo "  ✅ Reverse proxy configuration"
+echo "  ✅ Firewall allows HTTPS only (port 443)"
 echo ""
 echo "⚠️  Browser Warning:"
 echo "  Self-signed certificate will show security warning"
@@ -112,4 +114,4 @@ echo ""
 echo "📊 Current Status:"
 echo "  App URL: https://34.71.197.190"
 echo "  Config: PUBLIC_URL=https://34.71.197.190"
-echo "  Firewall: Ports 80/443 allowed"
+echo "  Firewall: Port 443 only (HTTPS)"
