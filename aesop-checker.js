@@ -4,6 +4,7 @@ const express = require('express');
 const nodemailer = require('nodemailer');
 const path = require('path');
 const CONFIG = require('./config'); // Load config from separate file
+const { requireAuth, handleLogin, handleLogout, checkAuthStatus, cookieParser } = require('./auth-middleware');
 
 // State
 let availableShifts = [];
@@ -56,6 +57,39 @@ else if (CONFIG.oauthClientId && CONFIG.oauthClientSecret && CONFIG.oauthRefresh
 
 // Express app for dashboard
 const app = express();
+
+// Add cookie parser middleware
+app.use(cookieParser);
+
+// Authentication routes (no auth required)
+app.post('/api/login', handleLogin);
+app.post('/api/logout', handleLogout);
+app.get('/api/auth-status', checkAuthStatus);
+
+// Serve login page
+app.get('/login', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+// Detailed health check endpoint
+app.get('/health/detailed', (req, res) => {
+    const health = {
+        status: 'OK',
+        timestamp: new Date().toISOString(),
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        lastCheck: lastChecked,
+        isChecking: isChecking,
+        availableShifts: availableShifts.length,
+        notifiedShifts: notifiedShiftIds.size,
+    };
+    res.json(health);
+});
+
+// Protect all other routes with authentication
+app.use(requireAuth);
+
+// Serve static files (protected)
 app.use(express.static('public'));
 
 app.get('/api/shifts', (req, res) => {
@@ -1211,21 +1245,7 @@ async function sendPushNotifications(jobs, fcmToken) {
     }
 }
 
-// Health check endpoint
-app.get('/health', (req, res) => {
-    const health = {
-        status: 'OK',
-        timestamp: new Date().toISOString(),
-        uptime: process.uptime(),
-        memory: process.memoryUsage(),
-        lastCheck: lastChecked,
-        isChecking: isChecking
-    };
-    
-    res.json(health);
-});
-
-// Detailed health check endpoint
+// Detailed health check endpoint (protected)
 app.get('/health/detailed', (req, res) => {
     const health = {
         status: 'OK',

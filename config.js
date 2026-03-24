@@ -48,5 +48,9 @@ module.exports = {
         ],
     
     position: process.env.POSITION || 'Substitute Teacher',
-    district: process.env.DISTRICT || 'Fremont Unified School District'
+    district: process.env.DISTRICT || 'Fremont Unified School District',
+    
+    // Dashboard Authentication
+    dashboardUsername: process.env.DASHBOARD_USERNAME || 'admin',
+    // Default password: Aesop@2026! (should be overridden by environment variables)
 };
