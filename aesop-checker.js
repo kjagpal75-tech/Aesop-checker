@@ -58,6 +58,10 @@ else if (CONFIG.oauthClientId && CONFIG.oauthClientSecret && CONFIG.oauthRefresh
 // Express app for dashboard
 const app = express();
 
+// Add middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
 // Add cookie parser middleware
 app.use(cookieParser);
 
