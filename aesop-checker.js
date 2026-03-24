@@ -776,8 +776,8 @@ function extractJobData(job) {
         
         // 🔄 ONLY CLOSE BROWSER IF NO AUTO-ACCEPT CANDIDATES
         // Check if there are any auto-accept candidates that might be processing
-        // Use filteredShifts instead of newShifts since newShifts is not in scope here
-        const hasAutoAcceptCandidates = filteredShifts.some(shift => {
+        // Use availableShifts since filteredShifts is not in scope here
+        const hasAutoAcceptCandidates = availableShifts.some(shift => {
             // Use the same robust date parsing as in the main auto-accept logic
             let shiftDate;
             try {
