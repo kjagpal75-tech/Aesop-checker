@@ -15,6 +15,8 @@ let page = null;
 let sessionCookies = null;
 let lastLoginTime = null;
 let isChecking = false;
+let checkStartTime = null;
+const CHECK_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
 // Email transporter setup - OAuth2 only for Outlook
 let transporter;
@@ -169,7 +171,23 @@ app.get('/api/accept-job/:jobId', async (req, res) => {
         
         const browser = await puppeteer.launch({
             headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-gpu',
+                '--disable-software-rasterizer',
+                '--disable-background-timer-throttling',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-renderer-backgrounding',
+                '--disable-features=TranslateUI',
+                '--disable-extensions',
+                '--disable-plugins',
+                '--disable-default-apps',
+                '--no-first-run',
+                '--no-default-browser-check'
+            ],
+            protocolTimeout: 120000 // 2 minutes
         });
 
         const page = await browser.newPage();
@@ -345,7 +363,23 @@ async function loginAndMaintainSession() {
     // Launch new browser
     browser = await puppeteer.launch({
         headless: 'new',
-        args: ['--no-sandbox', '--disable-setuid-sandbox']
+        args: [
+            '--no-sandbox', 
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-gpu',
+            '--disable-software-rasterizer',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--disable-features=TranslateUI',
+            '--disable-extensions',
+            '--disable-plugins',
+            '--disable-default-apps',
+            '--no-first-run',
+            '--no-default-browser-check'
+        ],
+        protocolTimeout: 120000 // 2 minutes
     });
 
     page = await browser.newPage();
@@ -426,14 +460,22 @@ function safeLog(message) {
     }
 }
 
-// Function to check for shifts
 async function checkForShifts() {
+    // Check if already checking
     if (isChecking) {
-        console.log('Check already in progress, skipping...');
-        return;
+        // Check if the check has been running too long (stuck)
+        if (checkStartTime && (Date.now() - checkStartTime) > CHECK_TIMEOUT) {
+            console.warn('⚠️ Check has been running too long, forcing reset...');
+            isChecking = false;
+            checkStartTime = null;
+        } else {
+            console.log('Check already in progress, skipping...');
+            return;
+        }
     }
 
     isChecking = true;
+    checkStartTime = Date.now();
     
     // CRITICAL: Clear stale data immediately to prevent showing old jobs
     console.log(`🗑️ CLEARING STALE DATA: Removing ${availableShifts.length} old jobs from dashboard`);
@@ -482,8 +524,13 @@ async function checkForShifts() {
                 require('fs').writeFileSync('after-login-preview.html', preview);
                 console.log('After-login preview saved to after-login-preview.html');
                 
-                await page.screenshot({ path: 'after-login.png', fullPage: true });
-                console.log('After-login screenshot saved');
+                try {
+                    await page.screenshot({ path: 'after-login.png', fullPage: true });
+                    console.log('After-login screenshot saved');
+                } catch (screenshotError) {
+                    console.warn('Screenshot failed:', screenshotError.message);
+                    // Continue without screenshot
+                }
             } else {
                 console.warn('After-login HTML appears to be empty or too short');
                 console.log('Page title:', await page.title());
@@ -857,6 +904,7 @@ function extractJobData(job) {
         }
     } finally {
         isChecking = false;
+        checkStartTime = null;
     }
 }
 
