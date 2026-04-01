@@ -770,16 +770,20 @@ function extractJobData(job) {
                     const pacificTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
                     // Alternative: Use proper Pacific Time conversion
                     const pacificTime2 = new Date(now.getTime() - (8 * 60 * 60 * 1000)); // PST is UTC-8
+                    
+                    // Calculate days difference instead of hours for more intuitive logic
+                    const daysDifference = Math.floor((shiftDate - pacificTime2) / (1000 * 60 * 60 * 24));
                     const hoursInFuture = (shiftDate - pacificTime2) / (1000 * 60 * 60);
                     
                     console.log(`🔧 AUTO-ACCEPT DEBUG: Processing shift ${shift.id}`);
                     console.log(`📅 Shift Date: ${shiftDate.toISOString()}`);
                     console.log(`🕐 Current Time: ${pacificTime2.toISOString()} (Pacific)`);
                     console.log(`⏰ Hours in Future: ${hoursInFuture.toFixed(2)}`);
+                    console.log(`📅 Days in Future: ${daysDifference} days`);
                     console.log(`🎯 Threshold: ${CONFIG.autoAcceptHoursInFuture} hours`);
-                    console.log(`✅ Auto-Accept: ${hoursInFuture >= CONFIG.autoAcceptHoursInFuture ? 'YES' : 'NO'}`);
+                    console.log(`✅ Auto-Accept: ${daysDifference >= 1 ? 'YES' : 'NO'} (same day or future)`);
                     
-                    return hoursInFuture >= CONFIG.autoAcceptHoursInFuture;
+                    return daysDifference >= 1; // Accept if same day or future
                 });
                 
                 if (autoAcceptCandidates.length > 0) {
@@ -888,8 +892,11 @@ function extractJobData(job) {
             const pacificTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
             // Alternative: Use proper Pacific Time conversion
             const pacificTime2 = new Date(now.getTime() - (8 * 60 * 60 * 1000)); // PST is UTC-8
+            
+            // Calculate days difference instead of hours for more intuitive logic
+            const daysDifference = Math.floor((shiftDate - pacificTime2) / (1000 * 60 * 60 * 24));
             const hoursInFuture = (shiftDate - pacificTime2) / (1000 * 60 * 60);
-            return CONFIG.autoAcceptEnabled && hoursInFuture >= CONFIG.autoAcceptHoursInFuture;
+            return CONFIG.autoAcceptEnabled && daysDifference >= 1; // Accept if same day or future
         });
         
         if (browser && !hasAutoAcceptCandidates) {
