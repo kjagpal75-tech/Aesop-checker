@@ -766,11 +766,15 @@ function extractJobData(job) {
                     }
                     
                     const now = new Date();
-                    const hoursInFuture = (shiftDate - now) / (1000 * 60 * 60);
+                    // Convert to Pacific Time for accurate calculation
+                    const pacificTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+                    // Alternative: Use proper Pacific Time conversion
+                    const pacificTime2 = new Date(now.getTime() - (8 * 60 * 60 * 1000)); // PST is UTC-8
+                    const hoursInFuture = (shiftDate - pacificTime2) / (1000 * 60 * 60);
                     
                     console.log(`🔧 AUTO-ACCEPT DEBUG: Processing shift ${shift.id}`);
                     console.log(`📅 Shift Date: ${shiftDate.toISOString()}`);
-                    console.log(`🕐 Current Time: ${now.toISOString()}`);
+                    console.log(`🕐 Current Time: ${pacificTime2.toISOString()} (Pacific)`);
                     console.log(`⏰ Hours in Future: ${hoursInFuture.toFixed(2)}`);
                     console.log(`🎯 Threshold: ${CONFIG.autoAcceptHoursInFuture} hours`);
                     console.log(`✅ Auto-Accept: ${hoursInFuture >= CONFIG.autoAcceptHoursInFuture ? 'YES' : 'NO'}`);
@@ -880,7 +884,11 @@ function extractJobData(job) {
             }
             
             const now = new Date();
-            const hoursInFuture = (shiftDate - now) / (1000 * 60 * 60);
+            // Convert to Pacific Time for accurate calculation
+            const pacificTime = new Date(now.toLocaleString("en-US", {timeZone: "America/Los_Angeles"}));
+            // Alternative: Use proper Pacific Time conversion
+            const pacificTime2 = new Date(now.getTime() - (8 * 60 * 60 * 1000)); // PST is UTC-8
+            const hoursInFuture = (shiftDate - pacificTime2) / (1000 * 60 * 60);
             return CONFIG.autoAcceptEnabled && hoursInFuture >= CONFIG.autoAcceptHoursInFuture;
         });
         
