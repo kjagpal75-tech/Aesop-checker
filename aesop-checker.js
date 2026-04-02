@@ -281,12 +281,23 @@ async function acceptJobWithSession(jobId, browser, page) {
         }, jobId);
 
         if (acceptSuccess) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait longer for processing
             
             // Look for confirmation dialog or success message
             const confirmation = await page.evaluate(() => {
-                const successElements = document.querySelectorAll('[class*="success"], [class*="confirm"], [class*="accepted"]');
-                return successElements.length > 0;
+                const successElements = document.querySelectorAll('[class*="success"], [class*="confirm"], [class*="accepted"], [class*="message"], [class*="notification"]');
+                const successText = Array.from(successElements).map(el => el.textContent.toLowerCase()).join(' ');
+                console.log('🔍 Looking for confirmation elements:', successElements.length, successText);
+                
+                // Check for various success indicators
+                const hasSuccess = successElements.length > 0 || 
+                    successText.includes('accepted') || 
+                    successText.includes('confirmed') || 
+                    successText.includes('success') ||
+                    document.body.textContent.toLowerCase().includes('accepted');
+                
+                console.log('✅ Acceptance confirmed:', hasSuccess);
+                return hasSuccess;
             });
 
             return {
