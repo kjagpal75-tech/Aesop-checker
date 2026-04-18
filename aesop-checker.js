@@ -638,31 +638,47 @@ function extractJobData(job) {
             if (page && !page.isClosed()) {
                 console.log('SCRAPING LIVE PAGE for current job data...');
                 
+                // Get the current page content
                 const livePageContent = await page.content();
-                // Parse the live page content
-                const livePageVarsMatch = livePageContent.match(/var pageVars = ({[\s\S]*?});/);
-                if (livePageVarsMatch) {
-                    const pageVarsText = livePageVarsMatch[0].replace(/^var pageVars = /, '').replace(/;$/, '');
-                    const pageVars = new Function(`return ${pageVarsText}`)();
-                    
-                    if (pageVars && pageVars.availJobs && pageVars.availJobs.list) {
-                        console.log(` LIVE DATA: Found ${pageVars.availJobs.list.length} jobs from live page`);
+                console.log('Live page content length:', livePageContent.length);
+                
+                // Parse the page content to extract pageVars
+                const pageVarsMatch = livePageContent.match(/var pageVars\s*=\s*({[\s\S]*?});/);
+                if (pageVarsMatch) {
+                    try {
+                        const pageVarsText = pageVarsMatch[1];
+                        console.log('🔍 pageVars match length:', pageVarsText.length);
+                        console.log('🔍 pageVars match preview:', pageVarsText.substring(0, 500));
+                        // Use new Function to evaluate JavaScript object notation
+                        const pageVars = new Function(`return ${pageVarsText}`)();
+                        console.log('Successfully parsed pageVars from live page');
                         
-                        for (const job of pageVars.availJobs.list) {
-                            // Use the helper function to extract job data
-                            const jobData = extractJobData(job);
-                            if (jobData) {
-                                console.log(` ADDING JOB: ${job.WorkerTitle} at ${jobData.school}`);
-                                shifts.push(jobData);
-                            } else {
-                                console.log(`❌ SKIPPED JOB: ${job.WorkerTitle} - extractJobData returned null`);
+                        if (pageVars.availJobs && pageVars.availJobs.list) {
+                            console.log(`Found ${pageVars.availJobs.list.length} jobs in live pageVars.availJobs.list`);
+                            if (pageVars.availJobs.list.length > 0) {
+                                console.log('🔍 Sample job data:', JSON.stringify(pageVars.availJobs.list[0]).substring(0, 200));
                             }
+                            
+                            for (const job of pageVars.availJobs.list) {
+                                // Use the helper function to extract job data
+                                const jobData = extractJobData(job);
+                                if (jobData) {
+                                    console.log(` ADDING JOB: ${job.WorkerTitle} at ${jobData.school}`);
+                                    shifts.push(jobData);
+                                } else {
+                                    console.log(`❌ SKIPPED JOB: ${job.WorkerTitle} - extractJobData returned null`);
+                                }
+                            }
+                        } else {
+                            console.log('No availJobs.list found in live pageVars');
+                            console.log('🔍 Available pageVars keys:', Object.keys(pageVars));
                         }
-                    } else {
-                        console.log('No availJobs.list found in live pageVars');
+                    } catch (error) {
+                        console.log('Error parsing pageVars:', error.message);
                     }
                 } else {
-                    console.log('No pageVars found in live page content');
+                    console.log('❌ No pageVars match found in live page content');
+                    console.log('No pageVars object found in live page');
                 }
             } else {
                 console.error(' Cannot scrape live page - page is closed or not available');
