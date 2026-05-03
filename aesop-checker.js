@@ -92,12 +92,7 @@ app.get('/health/detailed', (req, res) => {
     res.json(health);
 });
 
-// Protect all other routes with authentication
-app.use(requireAuth);
-
-// Serve static files (protected)
-app.use(express.static('public'));
-
+// Mobile API endpoints (no authentication required)
 app.get('/api/shifts', (req, res) => {
     // Add cache-busting headers to prevent stale data
     res.set({
@@ -228,6 +223,12 @@ app.get('/api/accept-job/:jobId', async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 });
+
+// Protect all non-API routes with authentication (web dashboard only)
+app.use(requireAuth);
+
+// Serve static files (protected)
+app.use(express.static('public'));
 
 // Function to accept a job with existing browser session
 async function acceptJobWithSession(jobId, browser, page) {
@@ -1005,10 +1006,7 @@ async function sendEmailNotification(shifts) {
     `).join('');
 
     // Prepare recipients for job notifications
-    const recipients = [CONFIG.emailTo];
-    if (CONFIG.jobNotificationTo) {
-        recipients.push(CONFIG.jobNotificationTo.trim());
-    }
+    const recipients = ['kjagpal75@gmail.com', 'hkjagpal@hotmail.com']; // Both recipients get job notifications
     
     const mailOptions = {
         from: CONFIG.emailFrom,
@@ -1078,7 +1076,7 @@ async function sendErrorNotification(error, context = "Unknown") {
 
     const mailOptions = {
         from: CONFIG.emailFrom,
-        to: CONFIG.emailTo,
+        to: 'kjagpal75@gmail.com', // Error notifications only to kjagpal75@gmail.com
         subject: `🚨 Aesop Checker Error - ${context}`,
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
@@ -1133,7 +1131,7 @@ async function sendAutoAcceptNotification(shift, status, message) {
     
     const mailOptions = {
         from: CONFIG.emailFrom,
-        to: 'kjagpal75@gmail.com',  // Send specifically to kjagpal75@gmail.com
+        to: 'kjagpal75@gmail.com, hkjagpal@hotmail.com',  // Send to both recipients
         subject: `🤖 Auto-Accept ${status}: ${shift.title} at ${shift.school}`,
         html: `
             <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
