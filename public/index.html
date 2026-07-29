@@ -41,6 +41,36 @@
                 </div>
             </div>
 
+            <!-- Settings Bar -->
+            <div class="bg-blue-50 border-b border-blue-200 p-4">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center gap-4">
+                        <div>
+                            <p class="text-sm text-gray-600">Check Interval:</p>
+                            <p class="font-semibold text-gray-800" id="currentInterval">Loading...</p>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <input 
+                                type="range" 
+                                id="intervalSlider" 
+                                min="0.5" 
+                                max="60" 
+                                step="0.5" 
+                                value="1"
+                                class="w-32 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                                oninput="updateIntervalPreview(this.value)">
+                            <span id="intervalPreview" class="text-sm font-semibold text-blue-600">1 min</span>
+                        </div>
+                    </div>
+                    <button 
+                        onclick="updateInterval()" 
+                        id="updateIntervalButton"
+                        class="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-600 transition text-sm">
+                        Apply
+                    </button>
+                </div>
+            </div>
+
             <!-- Shifts List -->
             <div class="p-6">
                 <div class="flex justify-between items-center mb-4">
@@ -74,6 +104,63 @@
 
     <script>
         let isChecking = false;
+        let currentIntervalMs = 60000;
+
+        async function loadCurrentInterval() {
+            try {
+                const response = await fetch('/api/interval');
+                const data = await response.json();
+                if (data.success) {
+                    currentIntervalMs = data.interval;
+                    const minutes = data.intervalMinutes;
+                    document.getElementById('currentInterval').textContent = `${minutes} min`;
+                    document.getElementById('intervalSlider').value = minutes;
+                    document.getElementById('intervalPreview').textContent = `${minutes} min`;
+                }
+            } catch (error) {
+                console.error('Error loading interval:', error);
+            }
+        }
+
+        function updateIntervalPreview(value) {
+            document.getElementById('intervalPreview').textContent = `${value} min`;
+        }
+
+        async function updateInterval() {
+            const minutes = parseFloat(document.getElementById('intervalSlider').value);
+            const intervalMs = Math.round(minutes * 60 * 1000);
+            
+            const button = document.getElementById('updateIntervalButton');
+            const originalText = button.textContent;
+            button.disabled = true;
+            button.textContent = 'Updating...';
+
+            try {
+                const response = await fetch('/api/update-interval', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ interval: intervalMs })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentIntervalMs = data.interval;
+                    document.getElementById('currentInterval').textContent = `${data.intervalMinutes} min`;
+                    alert(`Check interval updated to ${data.intervalMinutes} minutes!`);
+                } else {
+                    alert(`Failed to update interval: ${data.message}`);
+                }
+            } catch (error) {
+                console.error('Error updating interval:', error);
+                alert('Error updating interval. Please try again.');
+            } finally {
+                button.disabled = false;
+                button.textContent = originalText;
+            }
+        }
 
         async function loadShifts() {
             try {
@@ -169,6 +256,9 @@
 
         // Get the current base URL (works for both localhost and public IP)
         const baseUrl = window.location.origin;
+
+        // Load current interval on page load
+        loadCurrentInterval();
 
         // Load shifts on page load
         loadShifts();
