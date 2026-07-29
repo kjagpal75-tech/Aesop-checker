@@ -17,6 +17,8 @@ let lastLoginTime = null;
 let isChecking = false;
 let checkStartTime = null;
 const CHECK_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+let checkIntervalTimer = null;
+let currentCheckInterval = CONFIG.checkInterval;
 
 // Email transporter setup - OAuth2 only for Outlook
 let transporter;
@@ -88,6 +90,8 @@ app.get('/health/detailed', (req, res) => {
         isChecking: isChecking,
         availableShifts: availableShifts.length,
         notifiedShifts: notifiedShiftIds.size,
+        checkInterval: currentCheckInterval,
+        checkIntervalMinutes: Math.round(currentCheckInterval / 60000 * 10) / 10,
     };
     res.json(health);
 });
@@ -222,6 +226,58 @@ app.get('/api/accept-job/:jobId', async (req, res) => {
         console.error('Error accepting job:', error);
         res.status(500).json({ success: false, message: error.message });
     }
+});
+
+// API endpoint to update check interval (protected)
+app.post('/api/update-interval', requireAuth, (req, res) => {
+    const { interval } = req.body;
+    
+    // Validate interval (minimum 30 seconds, maximum 1 hour)
+    const minInterval = 30 * 1000; // 30 seconds
+    const maxInterval = 60 * 60 * 1000; // 1 hour
+    
+    if (!interval || isNaN(interval)) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'Invalid interval value' 
+        });
+    }
+    
+    if (interval < minInterval || interval > maxInterval) {
+        return res.status(400).json({ 
+            success: false, 
+            message: `Interval must be between ${minInterval/1000} and ${maxInterval/1000} seconds` 
+        });
+    }
+    
+    // Update the interval
+    currentCheckInterval = interval;
+    
+    // Clear existing timer and start new one
+    if (checkIntervalTimer) {
+        clearInterval(checkIntervalTimer);
+    }
+    
+    checkIntervalTimer = setInterval(checkForShifts, currentCheckInterval);
+    
+    console.log(`✅ Check interval updated to ${currentCheckInterval / 1000} seconds`);
+    
+    res.json({ 
+        success: true, 
+        message: `Check interval updated to ${Math.round(currentCheckInterval / 60000 * 10) / 10} minutes`,
+        interval: currentCheckInterval,
+        intervalMinutes: Math.round(currentCheckInterval / 60000 * 10) / 10
+    });
+});
+
+// API endpoint to get current interval (protected)
+app.get('/api/interval', requireAuth, (req, res) => {
+    res.json({
+        success: true,
+        interval: currentCheckInterval,
+        intervalMinutes: Math.round(currentCheckInterval / 60000 * 10) / 10,
+        intervalSeconds: Math.round(currentCheckInterval / 1000)
+    });
 });
 
 // Protect all non-API routes with authentication (web dashboard only)
@@ -1280,7 +1336,7 @@ const PORT = 3000;
 // Listen only on localhost for security (accessible only via Nginx proxy)
 app.listen(PORT, '127.0.0.1', async () => {
     console.log(`Dashboard available at ${CONFIG.publicUrl}`);
-    console.log(`Checking for shifts every ${CONFIG.checkInterval / 60000} minutes`);
+    console.log(`Checking for shifts every ${currentCheckInterval / 60000} minutes`);
     
     // Test email configuration on startup
     console.log('\n=== Email Configuration Test ===');
@@ -1290,6 +1346,6 @@ app.listen(PORT, '127.0.0.1', async () => {
     // Initial check
     checkForShifts();
     
-    // Set up periodic checking
-    setInterval(checkForShifts, CONFIG.checkInterval);
+    // Set up periodic checking with dynamic interval
+    checkIntervalTimer = setInterval(checkForShifts, currentCheckInterval);
 });
