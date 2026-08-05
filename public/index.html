@@ -32,42 +32,19 @@
                             Ready
                         </p>
                     </div>
-                    <button 
-                        onclick="checkNow()" 
-                        id="checkButton"
-                        class="bg-blue-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-600 transition">
-                        Check Now
-                    </button>
-                </div>
-            </div>
-
-            <!-- Settings Bar -->
-            <div class="bg-blue-50 border-b border-blue-200 p-4">
-                <div class="flex justify-between items-center">
-                    <div class="flex items-center gap-4">
-                        <div>
-                            <p class="text-sm text-gray-600">Check Interval:</p>
-                            <p class="font-semibold text-gray-800" id="currentInterval">Loading...</p>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <input 
-                                type="range" 
-                                id="intervalSlider" 
-                                min="0.5" 
-                                max="60" 
-                                step="0.5" 
-                                value="1"
-                                class="w-32 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
-                                oninput="updateIntervalPreview(this.value)">
-                            <span id="intervalPreview" class="text-sm font-semibold text-blue-600">1 min</span>
-                        </div>
+                    <div class="flex gap-2">
+                        <button 
+                            onclick="openSettings()" 
+                            class="bg-gray-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-gray-600 transition">
+                            ⚙️ Settings
+                        </button>
+                        <button 
+                            onclick="checkNow()" 
+                            id="checkButton"
+                            class="bg-blue-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-600 transition">
+                            Check Now
+                        </button>
                     </div>
-                    <button 
-                        onclick="updateInterval()" 
-                        id="updateIntervalButton"
-                        class="bg-green-500 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-600 transition text-sm">
-                        Apply
-                    </button>
                 </div>
             </div>
 
@@ -93,74 +70,18 @@
         <div class="mt-6 bg-white rounded-xl shadow-lg p-6">
             <h3 class="font-bold text-gray-800 mb-3">ℹ️ How it works</h3>
             <ul class="space-y-2 text-sm text-gray-700">
-                <li>✅ Automatically checks for new shifts every 1 minute</li>
+                <li>✅ Automatically checks for new shifts (configurable frequency)</li>
                 <li>✅ Searches for Substitute Teacher positions in Fremont Unified</li>
                 <li>✅ Searches indefinitely into the future for all available positions</li>
                 <li>✅ Sends email notification to kjagpal75@gmail.com when new shifts appear</li>
                 <li>✅ Dashboard refreshes automatically every 30 seconds</li>
+                <li>✅ Use Settings button to configure check frequency and auto-accept</li>
             </ul>
         </div>
     </div>
 
     <script>
         let isChecking = false;
-        let currentIntervalMs = 60000;
-
-        async function loadCurrentInterval() {
-            try {
-                const response = await fetch('/api/interval');
-                const data = await response.json();
-                if (data.success) {
-                    currentIntervalMs = data.interval;
-                    const minutes = data.intervalMinutes;
-                    document.getElementById('currentInterval').textContent = `${minutes} min`;
-                    document.getElementById('intervalSlider').value = minutes;
-                    document.getElementById('intervalPreview').textContent = `${minutes} min`;
-                }
-            } catch (error) {
-                console.error('Error loading interval:', error);
-            }
-        }
-
-        function updateIntervalPreview(value) {
-            document.getElementById('intervalPreview').textContent = `${value} min`;
-        }
-
-        async function updateInterval() {
-            const minutes = parseFloat(document.getElementById('intervalSlider').value);
-            const intervalMs = Math.round(minutes * 60 * 1000);
-            
-            const button = document.getElementById('updateIntervalButton');
-            const originalText = button.textContent;
-            button.disabled = true;
-            button.textContent = 'Updating...';
-
-            try {
-                const response = await fetch('/api/update-interval', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ interval: intervalMs })
-                });
-                
-                const data = await response.json();
-                
-                if (data.success) {
-                    currentIntervalMs = data.interval;
-                    document.getElementById('currentInterval').textContent = `${data.intervalMinutes} min`;
-                    alert(`Check interval updated to ${data.intervalMinutes} minutes!`);
-                } else {
-                    alert(`Failed to update interval: ${data.message}`);
-                }
-            } catch (error) {
-                console.error('Error updating interval:', error);
-                alert('Error updating interval. Please try again.');
-            } finally {
-                button.disabled = false;
-                button.textContent = originalText;
-            }
-        }
 
         async function loadShifts() {
             try {
@@ -256,9 +177,6 @@
 
         // Get the current base URL (works for both localhost and public IP)
         const baseUrl = window.location.origin;
-
-        // Load current interval on page load
-        loadCurrentInterval();
 
         // Load shifts on page load
         loadShifts();
@@ -362,6 +280,134 @@
 
         // Auto-refresh every 30 seconds
         setInterval(loadShifts, 30000);
+
+        // Settings functions
+        async function openSettings() {
+            const modal = document.getElementById('settingsModal');
+            modal.classList.remove('hidden');
+            await loadSettings();
+        }
+
+        function closeSettings() {
+            document.getElementById('settingsModal').classList.add('hidden');
+        }
+
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                const data = await response.json();
+                
+                document.getElementById('checkInterval').value = data.checkIntervalMinutes;
+                document.getElementById('autoAcceptEnabled').checked = data.autoAcceptEnabled;
+                document.getElementById('autoAcceptHoursInFuture').value = data.autoAcceptHoursInFuture;
+                document.getElementById('autoAcceptLogOnly').checked = data.autoAcceptLogOnly;
+                document.getElementById('autoAcceptSchools').value = data.autoAcceptSchools.join(', ');
+            } catch (error) {
+                console.error('Error loading settings:', error);
+            }
+        }
+
+        async function saveSettings() {
+            try {
+                const checkInterval = document.getElementById('checkInterval').value;
+                const autoAcceptEnabled = document.getElementById('autoAcceptEnabled').checked;
+                const autoAcceptHoursInFuture = document.getElementById('autoAcceptHoursInFuture').value;
+                const autoAcceptLogOnly = document.getElementById('autoAcceptLogOnly').checked;
+                const autoAcceptSchools = document.getElementById('autoAcceptSchools').value;
+
+                const response = await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        checkInterval: parseInt(checkInterval) * 60 * 1000, // Convert minutes to milliseconds
+                        autoAcceptEnabled,
+                        autoAcceptHoursInFuture: parseInt(autoAcceptHoursInFuture),
+                        autoAcceptLogOnly,
+                        autoAcceptSchools
+                    })
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    alert('Settings saved successfully!');
+                    closeSettings();
+                    // Reload shifts to reflect any changes
+                    loadShifts();
+                } else {
+                    alert('Failed to save settings: ' + (data.error || 'Unknown error'));
+                }
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                alert('Failed to save settings: ' + error.message);
+            }
+        }
     </script>
+
+    <!-- Settings Modal -->
+    <div id="settingsModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+        <div class="bg-white rounded-2xl shadow-2xl p-6 max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">⚙️ Settings</h2>
+                <button onclick="closeSettings()" class="text-gray-500 hover:text-gray-700 text-2xl">&times;</button>
+            </div>
+
+            <div class="space-y-6">
+                <!-- Check Interval -->
+                <div>
+                    <label class="block text-sm font-semibold text-gray-700 mb-2">Check Frequency (minutes)</label>
+                    <select id="checkInterval" class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <option value="0.5">30 seconds</option>
+                        <option value="1">1 minute</option>
+                        <option value="2">2 minutes</option>
+                        <option value="5">5 minutes</option>
+                        <option value="10">10 minutes</option>
+                        <option value="15">15 minutes</option>
+                        <option value="30">30 minutes</option>
+                    </select>
+                    <p class="text-xs text-gray-500 mt-1">How often to check for new shifts</p>
+                </div>
+
+                <!-- Auto-Accept Settings -->
+                <div class="border-t pt-4">
+                    <h3 class="text-lg font-semibold text-gray-800 mb-4">Auto-Accept Settings</h3>
+                    
+                    <div class="flex items-center mb-4">
+                        <input type="checkbox" id="autoAcceptEnabled" class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
+                        <label for="autoAcceptEnabled" class="ml-3 text-sm font-medium text-gray-700">Enable Auto-Accept</label>
+                    </div>
+
+                    <div class="mb-4">
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">Hours in Future</label>
+                        <input type="number" id="autoAcceptHoursInFuture" min="1" max="168" class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
+                        <p class="text-xs text-gray-500 mt-1">Only auto-accept jobs this many hours in the future</p>
+                    </div>
+
+                    <div class="flex items-center mb-4">
+                        <input type="checkbox" id="autoAcceptLogOnly" class="w-5 h-5 text-blue-600 rounded focus:ring-blue-500">
+                        <label for="autoAcceptLogOnly" class="ml-3 text-sm font-medium text-gray-700">Log Only (don't actually accept)</label>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">Allowed Schools</label>
+                        <textarea id="autoAcceptSchools" rows="3" class="w-full border border-gray-300 rounded-lg px-4 py-2 focus:ring-2 focus:ring-blue-500 focus:border-blue-500" placeholder="WASHINGTON HIGH SCHOOL, AMERICAN HIGH SCHOOL, etc."></textarea>
+                        <p class="text-xs text-gray-500 mt-1">Comma-separated list of schools (case-insensitive)</p>
+                    </div>
+                </div>
+
+                <!-- Save Button -->
+                <div class="flex gap-3 pt-4 border-t">
+                    <button onclick="closeSettings()" class="flex-1 bg-gray-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-gray-600 transition">
+                        Cancel
+                    </button>
+                    <button onclick="saveSettings()" class="flex-1 bg-blue-500 text-white px-6 py-2 rounded-lg font-semibold hover:bg-blue-600 transition">
+                        Save Settings
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>

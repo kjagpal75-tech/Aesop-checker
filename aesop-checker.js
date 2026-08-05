@@ -17,8 +17,17 @@ let lastLoginTime = null;
 let isChecking = false;
 let checkStartTime = null;
 const CHECK_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-let checkIntervalTimer = null;
-let currentCheckInterval = CONFIG.checkInterval;
+
+// Dynamic settings (can be updated via API)
+let settings = {
+    checkInterval: CONFIG.checkInterval,
+    autoAcceptEnabled: CONFIG.autoAcceptEnabled,
+    autoAcceptHoursInFuture: CONFIG.autoAcceptHoursInFuture,
+    autoAcceptLogOnly: CONFIG.autoAcceptLogOnly,
+    autoAcceptSchools: CONFIG.autoAcceptSchools
+};
+
+let checkIntervalId = null;
 
 // Email transporter setup - OAuth2 only for Outlook
 let transporter;
@@ -90,8 +99,6 @@ app.get('/health/detailed', (req, res) => {
         isChecking: isChecking,
         availableShifts: availableShifts.length,
         notifiedShifts: notifiedShiftIds.size,
-        checkInterval: currentCheckInterval,
-        checkIntervalMinutes: Math.round(currentCheckInterval / 60000 * 10) / 10,
     };
     res.json(health);
 });
@@ -228,56 +235,80 @@ app.get('/api/accept-job/:jobId', async (req, res) => {
     }
 });
 
-// API endpoint to update check interval (protected)
-app.post('/api/update-interval', requireAuth, (req, res) => {
-    const { interval } = req.body;
-    
-    // Validate interval (minimum 30 seconds, maximum 1 hour)
-    const minInterval = 30 * 1000; // 30 seconds
-    const maxInterval = 60 * 60 * 1000; // 1 hour
-    
-    if (!interval || isNaN(interval)) {
-        return res.status(400).json({ 
-            success: false, 
-            message: 'Invalid interval value' 
-        });
-    }
-    
-    if (interval < minInterval || interval > maxInterval) {
-        return res.status(400).json({ 
-            success: false, 
-            message: `Interval must be between ${minInterval/1000} and ${maxInterval/1000} seconds` 
-        });
-    }
-    
-    // Update the interval
-    currentCheckInterval = interval;
-    
-    // Clear existing timer and start new one
-    if (checkIntervalTimer) {
-        clearInterval(checkIntervalTimer);
-    }
-    
-    checkIntervalTimer = setInterval(checkForShifts, currentCheckInterval);
-    
-    console.log(`✅ Check interval updated to ${currentCheckInterval / 1000} seconds`);
-    
-    res.json({ 
-        success: true, 
-        message: `Check interval updated to ${Math.round(currentCheckInterval / 60000 * 10) / 10} minutes`,
-        interval: currentCheckInterval,
-        intervalMinutes: Math.round(currentCheckInterval / 60000 * 10) / 10
+// Settings API endpoints (protected - requires authentication)
+app.get('/api/settings', requireAuth, (req, res) => {
+    res.json({
+        checkInterval: settings.checkInterval,
+        checkIntervalMinutes: Math.round(settings.checkInterval / 60000),
+        autoAcceptEnabled: settings.autoAcceptEnabled,
+        autoAcceptHoursInFuture: settings.autoAcceptHoursInFuture,
+        autoAcceptLogOnly: settings.autoAcceptLogOnly,
+        autoAcceptSchools: settings.autoAcceptSchools
     });
 });
 
-// API endpoint to get current interval (protected)
-app.get('/api/interval', requireAuth, (req, res) => {
-    res.json({
-        success: true,
-        interval: currentCheckInterval,
-        intervalMinutes: Math.round(currentCheckInterval / 60000 * 10) / 10,
-        intervalSeconds: Math.round(currentCheckInterval / 1000)
-    });
+app.post('/api/settings', requireAuth, (req, res) => {
+    try {
+        const { checkInterval, autoAcceptEnabled, autoAcceptHoursInFuture, autoAcceptLogOnly, autoAcceptSchools } = req.body;
+        
+        // Update check interval if provided
+        if (checkInterval !== undefined) {
+            const newInterval = parseInt(checkInterval);
+            if (newInterval >= 10000) { // Minimum 10 seconds
+                settings.checkInterval = newInterval;
+                
+                // Restart the interval timer with new frequency
+                if (checkIntervalId) {
+                    clearInterval(checkIntervalId);
+                }
+                checkIntervalId = setInterval(checkForShifts, settings.checkInterval);
+                
+                console.log(`✅ Check interval updated to ${settings.checkInterval / 60000} minutes`);
+            } else {
+                return res.status(400).json({ error: 'Check interval must be at least 10 seconds' });
+            }
+        }
+        
+        // Update auto-accept settings if provided
+        if (autoAcceptEnabled !== undefined) {
+            settings.autoAcceptEnabled = autoAcceptEnabled === true || autoAcceptEnabled === 'true';
+            console.log(`✅ Auto-accept enabled: ${settings.autoAcceptEnabled}`);
+        }
+        
+        if (autoAcceptHoursInFuture !== undefined) {
+            settings.autoAcceptHoursInFuture = parseInt(autoAcceptHoursInFuture);
+            console.log(`✅ Auto-accept hours in future: ${settings.autoAcceptHoursInFuture}`);
+        }
+        
+        if (autoAcceptLogOnly !== undefined) {
+            settings.autoAcceptLogOnly = autoAcceptLogOnly === true || autoAcceptLogOnly === 'true';
+            console.log(`✅ Auto-accept log only: ${settings.autoAcceptLogOnly}`);
+        }
+        
+        if (autoAcceptSchools !== undefined) {
+            if (Array.isArray(autoAcceptSchools)) {
+                settings.autoAcceptSchools = autoAcceptSchools.map(s => s.trim().toUpperCase());
+            } else if (typeof autoAcceptSchools === 'string') {
+                settings.autoAcceptSchools = autoAcceptSchools.split(',').map(s => s.trim().toUpperCase());
+            }
+            console.log(`✅ Auto-accept schools: ${settings.autoAcceptSchools.join(', ')}`);
+        }
+        
+        res.json({
+            success: true,
+            settings: {
+                checkInterval: settings.checkInterval,
+                checkIntervalMinutes: Math.round(settings.checkInterval / 60000),
+                autoAcceptEnabled: settings.autoAcceptEnabled,
+                autoAcceptHoursInFuture: settings.autoAcceptHoursInFuture,
+                autoAcceptLogOnly: settings.autoAcceptLogOnly,
+                autoAcceptSchools: settings.autoAcceptSchools
+            }
+        });
+    } catch (error) {
+        console.error('Error updating settings:', error);
+        res.status(500).json({ error: 'Failed to update settings' });
+    }
 });
 
 // Protect all non-API routes with authentication (web dashboard only)
@@ -791,18 +822,18 @@ function extractJobData(job) {
             console.log(`📧 EMAIL SENT at ${new Date().toISOString()} (${emailEndTime - emailStartTime}ms)`);
             
             // AUTO-ACCEPT: Check for jobs that meet auto-accept criteria
-            if (CONFIG.autoAcceptEnabled) {
+            if (settings.autoAcceptEnabled) {
                 const autoAcceptCandidates = newShifts.filter(shift => {
                     // 🏫 SCHOOL FILTER: Check if school is in allowed list
                     const schoolName = shift.school ? shift.school.trim().toUpperCase() : '';
                     
-                    // Fix TypeError: Ensure CONFIG.autoAcceptSchools is defined
-                    if (!CONFIG.autoAcceptSchools || !Array.isArray(CONFIG.autoAcceptSchools)) {
-                        console.log('❌ AUTO-ACCEPT: CONFIG.autoAcceptSchools is not defined or not an array');
+                    // Fix TypeError: Ensure settings.autoAcceptSchools is defined
+                    if (!settings.autoAcceptSchools || !Array.isArray(settings.autoAcceptSchools)) {
+                        console.log('❌ AUTO-ACCEPT: settings.autoAcceptSchools is not defined or not an array');
                         return false;
                     }
                     
-                    const allowedSchools = CONFIG.autoAcceptSchools.map(s => s.toUpperCase());
+                    const allowedSchools = settings.autoAcceptSchools.map(s => s.toUpperCase());
                     
                     console.log(`🏫 SCHOOL FILTER: Checking "${schoolName}" against allowed schools`);
                     console.log(`📋 ALLOWED SCHOOLS: ${allowedSchools.join(', ')}`);
@@ -866,7 +897,7 @@ function extractJobData(job) {
                     console.log(`🕐 Current Time: ${pacificTime2.toISOString()} (Pacific)`);
                     console.log(`⏰ Hours in Future: ${hoursInFuture.toFixed(2)}`);
                     console.log(`📅 Days in Future: ${daysDifference} days`);
-                    console.log(`🎯 Threshold: ${CONFIG.autoAcceptHoursInFuture} hours`);
+                    console.log(`🎯 Threshold: ${settings.autoAcceptHoursInFuture} hours`);
                     console.log(`✅ Auto-Accept: ${daysDifference >= 1 ? 'YES' : 'NO'} (same day or future)`);
                     
                     return daysDifference >= 1; // Accept if same day or future
@@ -938,7 +969,7 @@ function extractJobData(job) {
         console.log(`🏫 SCHOOLS: ${filteredShifts.map(s => s.school).join(', ')}`);
         
         // Add a small delay to ensure checking status is visible in dashboard
-        if (CONFIG.checkInterval < 5000) {
+        if (settings.checkInterval < 5000) {
             await new Promise(resolve => setTimeout(resolve, 2000));
         }
 
@@ -982,7 +1013,7 @@ function extractJobData(job) {
             // Calculate days difference instead of hours for more intuitive logic
             const daysDifference = Math.floor((shiftDate - pacificTime2) / (1000 * 60 * 60 * 24));
             const hoursInFuture = (shiftDate - pacificTime2) / (1000 * 60 * 60);
-            return CONFIG.autoAcceptEnabled && daysDifference >= 1; // Accept if same day or future
+            return settings.autoAcceptEnabled && daysDifference >= 1; // Accept if same day or future
         });
         
         if (browser && !hasAutoAcceptCandidates) {
@@ -1336,7 +1367,7 @@ const PORT = 3000;
 // Listen only on localhost for security (accessible only via Nginx proxy)
 app.listen(PORT, '127.0.0.1', async () => {
     console.log(`Dashboard available at ${CONFIG.publicUrl}`);
-    console.log(`Checking for shifts every ${currentCheckInterval / 60000} minutes`);
+    console.log(`Checking for shifts every ${settings.checkInterval / 60000} minutes`);
     
     // Test email configuration on startup
     console.log('\n=== Email Configuration Test ===');
@@ -1347,5 +1378,5 @@ app.listen(PORT, '127.0.0.1', async () => {
     checkForShifts();
     
     // Set up periodic checking with dynamic interval
-    checkIntervalTimer = setInterval(checkForShifts, currentCheckInterval);
+    checkIntervalId = setInterval(checkForShifts, settings.checkInterval);
 });
