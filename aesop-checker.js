@@ -1486,7 +1486,7 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Start the Express server
-const PORT = 4000;
+const PORT = 3000;
 // Listen only on localhost for security (accessible only via Nginx proxy)
 app.listen(PORT, '127.0.0.1', async () => {
     console.log(`Dashboard available at ${CONFIG.publicUrl}`);
