@@ -321,7 +321,7 @@
                         'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({
-                        checkInterval: parseInt(checkInterval) * 60 * 1000, // Convert minutes to milliseconds
+                        checkInterval: parseFloat(checkInterval) * 60 * 1000, // Convert minutes to milliseconds
                         autoAcceptEnabled,
                         autoAcceptHoursInFuture: parseInt(autoAcceptHoursInFuture),
                         autoAcceptLogOnly,
