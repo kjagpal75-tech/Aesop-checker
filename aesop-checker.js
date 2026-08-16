@@ -323,7 +323,7 @@ app.post('/api/settings', requireAuth, (req, res) => {
         // Update check interval if provided
         if (checkInterval !== undefined) {
             let newInterval = parseInt(checkInterval);
-            console.log(`Received check interval request: ${checkInterval}, parsed as: ${newInterval}ms`);
+            console.log(`Received check interval request: ${checkInterval} (type: ${typeof checkInterval}), parsed as: ${newInterval}ms`);
             
             // If the value is small (< 1000), assume it's in seconds and convert to milliseconds
             if (newInterval < 1000) {
@@ -331,7 +331,8 @@ app.post('/api/settings', requireAuth, (req, res) => {
                 newInterval = newInterval * 1000;
             }
             
-            if (newInterval >= 5000) { // Minimum 5 seconds (reduced from 10 seconds for testing)
+            // Temporarily remove minimum validation for debugging
+            if (newInterval > 0) { // Just ensure it's positive
                 settings.checkInterval = newInterval;
                 
                 // Restart the interval timer with new frequency
@@ -340,11 +341,11 @@ app.post('/api/settings', requireAuth, (req, res) => {
                 }
                 checkIntervalId = setInterval(checkForShifts, settings.checkInterval);
                 
-                console.log(`✅ Check interval updated to ${settings.checkInterval / 60000} minutes`);
+                console.log(`✅ Check interval updated to ${settings.checkInterval / 60000} minutes (${settings.checkInterval}ms)`);
                 settingsChanged = true;
             } else {
-                console.log(`❌ Check interval validation failed: ${newInterval}ms is less than 5000ms`);
-                return res.status(400).json({ error: 'Check interval must be at least 5 seconds (5000ms)' });
+                console.log(`❌ Check interval validation failed: ${newInterval}ms is not positive`);
+                return res.status(400).json({ error: 'Check interval must be a positive number' });
             }
         }
         
