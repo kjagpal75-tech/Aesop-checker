@@ -1,0 +1,17 @@
+{
+  "checkInterval": 600000,
+  "autoAcceptEnabled": true,
+  "autoAcceptHoursInFuture": 48,
+  "autoAcceptLogOnly": false,
+  "autoAcceptSchools": [
+    "WASHINGTON HIGH SCHOOL",
+    "AMERICAN HIGH SCHOOL",
+    "HORNER MIDDLE SCHOOL",
+    "HOPKINS MIDDLE SCHOOL",
+    "KENNEDY HIGH SCHOOL",
+    "MISSION SAN JOSE HIGH SCHOOL",
+    "IRVINGTON HIGH SCHOOL",
+    "ROBERTSON CONTINUATION"
+  ],
+  "lastUpdated": "2026-08-16T03:40:05.263Z"
+}

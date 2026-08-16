@@ -3,6 +3,7 @@ const puppeteer = require('puppeteer');
 const express = require('express');
 const nodemailer = require('nodemailer');
 const path = require('path');
+const fs = require('fs');
 const CONFIG = require('./config'); // Load config from separate file
 const { requireAuth, handleLogin, handleLogout, checkAuthStatus, cookieParser } = require('./auth-middleware');
 
@@ -18,6 +19,11 @@ let isChecking = false;
 let checkStartTime = null;
 const CHECK_TIMEOUT = 5 * 60 * 1000; // 5 minutes
 
+// Optimized Configuration
+const SESSION_TIMEOUT = 2 * 60 * 60 * 1000; // 2 hours (extended from 30 minutes)
+const PAGE_LOAD_TIMEOUT = 3000; // 3 seconds (reduced from 5 seconds)
+const DYNAMIC_CONTENT_TIMEOUT = 2000; // 2 seconds (reduced from 3 seconds)
+
 // Dynamic settings (can be updated via API)
 let settings = {
     checkInterval: CONFIG.checkInterval,
@@ -26,6 +32,68 @@ let settings = {
     autoAcceptLogOnly: CONFIG.autoAcceptLogOnly,
     autoAcceptSchools: CONFIG.autoAcceptSchools
 };
+
+const SETTINGS_FILE = 'settings.json';
+
+// Load settings from JSON file if it exists
+function loadSettingsFromFile() {
+    try {
+        if (fs.existsSync(SETTINGS_FILE)) {
+            const savedSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+            console.log('📂 Loading settings from file:', SETTINGS_FILE);
+            
+            // Override CONFIG settings with saved settings
+            if (savedSettings.checkInterval !== undefined) {
+                settings.checkInterval = savedSettings.checkInterval;
+                console.log(`  ✓ Check interval: ${settings.checkInterval / 60000} minutes`);
+            }
+            if (savedSettings.autoAcceptEnabled !== undefined) {
+                settings.autoAcceptEnabled = savedSettings.autoAcceptEnabled;
+                console.log(`  ✓ Auto-accept enabled: ${settings.autoAcceptEnabled}`);
+            }
+            if (savedSettings.autoAcceptHoursInFuture !== undefined) {
+                settings.autoAcceptHoursInFuture = savedSettings.autoAcceptHoursInFuture;
+                console.log(`  ✓ Auto-accept hours in future: ${settings.autoAcceptHoursInFuture}`);
+            }
+            if (savedSettings.autoAcceptLogOnly !== undefined) {
+                settings.autoAcceptLogOnly = savedSettings.autoAcceptLogOnly;
+                console.log(`  ✓ Auto-accept log only: ${settings.autoAcceptLogOnly}`);
+            }
+            if (savedSettings.autoAcceptSchools !== undefined) {
+                settings.autoAcceptSchools = savedSettings.autoAcceptSchools;
+                console.log(`  ✓ Auto-accept schools: ${settings.autoAcceptSchools.join(', ')}`);
+            }
+            
+            console.log('✅ Settings loaded successfully');
+            return true;
+        }
+        return false;
+    } catch (error) {
+        console.error('Error loading settings from file:', error.message);
+        return false;
+    }
+}
+
+// Save settings to JSON file
+function saveSettingsToFile() {
+    try {
+        const settingsToSave = {
+            checkInterval: settings.checkInterval,
+            autoAcceptEnabled: settings.autoAcceptEnabled,
+            autoAcceptHoursInFuture: settings.autoAcceptHoursInFuture,
+            autoAcceptLogOnly: settings.autoAcceptLogOnly,
+            autoAcceptSchools: settings.autoAcceptSchools,
+            lastUpdated: new Date().toISOString()
+        };
+        
+        fs.writeFileSync(SETTINGS_FILE, JSON.stringify(settingsToSave, null, 2));
+        console.log('💾 Settings saved to file:', SETTINGS_FILE);
+        return true;
+    } catch (error) {
+        console.error('Error saving settings to file:', error.message);
+        return false;
+    }
+}
 
 let checkIntervalId = null;
 
@@ -148,11 +216,11 @@ app.get('/api/check-now', async (req, res) => {
         // Wait for the check to complete
         await checkForShifts();
         // Wait for page to load completely
-        await page.waitForTimeout(5000);
+        await page.waitForTimeout(PAGE_LOAD_TIMEOUT);
             
         // Wait additional time for dynamic content to load
         console.log('Waiting for dynamic job loading...');
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(DYNAMIC_CONTENT_TIMEOUT);
         res.json({ 
             message: 'Check completed',
             lastChecked: lastChecked,
@@ -220,7 +288,7 @@ app.get('/api/accept-job/:jobId', async (req, res) => {
             page.click('#qa-button-login')
         ]);
 
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, DYNAMIC_CONTENT_TIMEOUT));
 
         // Use acceptJobWithSession with the new browser session
         const result = await acceptJobWithSession(jobId, browser, page);
@@ -250,6 +318,7 @@ app.get('/api/settings', requireAuth, (req, res) => {
 app.post('/api/settings', requireAuth, (req, res) => {
     try {
         const { checkInterval, autoAcceptEnabled, autoAcceptHoursInFuture, autoAcceptLogOnly, autoAcceptSchools } = req.body;
+        let settingsChanged = false;
         
         // Update check interval if provided
         if (checkInterval !== undefined) {
@@ -264,6 +333,7 @@ app.post('/api/settings', requireAuth, (req, res) => {
                 checkIntervalId = setInterval(checkForShifts, settings.checkInterval);
                 
                 console.log(`✅ Check interval updated to ${settings.checkInterval / 60000} minutes`);
+                settingsChanged = true;
             } else {
                 return res.status(400).json({ error: 'Check interval must be at least 10 seconds' });
             }
@@ -273,16 +343,19 @@ app.post('/api/settings', requireAuth, (req, res) => {
         if (autoAcceptEnabled !== undefined) {
             settings.autoAcceptEnabled = autoAcceptEnabled === true || autoAcceptEnabled === 'true';
             console.log(`✅ Auto-accept enabled: ${settings.autoAcceptEnabled}`);
+            settingsChanged = true;
         }
         
         if (autoAcceptHoursInFuture !== undefined) {
             settings.autoAcceptHoursInFuture = parseInt(autoAcceptHoursInFuture);
             console.log(`✅ Auto-accept hours in future: ${settings.autoAcceptHoursInFuture}`);
+            settingsChanged = true;
         }
         
         if (autoAcceptLogOnly !== undefined) {
             settings.autoAcceptLogOnly = autoAcceptLogOnly === true || autoAcceptLogOnly === 'true';
             console.log(`✅ Auto-accept log only: ${settings.autoAcceptLogOnly}`);
+            settingsChanged = true;
         }
         
         if (autoAcceptSchools !== undefined) {
@@ -292,6 +365,12 @@ app.post('/api/settings', requireAuth, (req, res) => {
                 settings.autoAcceptSchools = autoAcceptSchools.split(',').map(s => s.trim().toUpperCase());
             }
             console.log(`✅ Auto-accept schools: ${settings.autoAcceptSchools.join(', ')}`);
+            settingsChanged = true;
+        }
+        
+        // Save settings to file if any changes were made
+        if (settingsChanged) {
+            saveSettingsToFile();
         }
         
         res.json({
@@ -348,7 +427,7 @@ async function acceptJobWithSession(jobId, browser, page) {
             timeout: 30000
         });
 
-        await new Promise(resolve => setTimeout(resolve, 3000));
+        await new Promise(resolve => setTimeout(resolve, DYNAMIC_CONTENT_TIMEOUT));
 
         // Find and click the accept button for the specific job
         const acceptSuccess = await page.evaluate((targetJobId) => {
@@ -369,7 +448,7 @@ async function acceptJobWithSession(jobId, browser, page) {
         }, jobId);
 
         if (acceptSuccess) {
-            await new Promise(resolve => setTimeout(resolve, 5000)); // Wait longer for processing
+            await new Promise(resolve => setTimeout(resolve, PAGE_LOAD_TIMEOUT)); // Use configured timeout
             
             // Look for confirmation dialog or success message
             const confirmation = await page.evaluate(() => {
@@ -425,22 +504,39 @@ function getNext30BusinessDays() {
 
 // Function to login and maintain session
 async function loginAndMaintainSession() {
-    // If we have a valid session (less than 30 minutes old), return it
+    // If we have a valid session (less than SESSION_TIMEOUT), return it
     if (browser && page && sessionCookies && lastLoginTime) {
         const sessionAge = Date.now() - lastLoginTime;
-        const thirtyMinutes = 30 * 60 * 1000;
         
-        if (sessionAge < thirtyMinutes) {
+        if (sessionAge < SESSION_TIMEOUT) {
             console.log('Using existing session (age:', Math.round(sessionAge / 60000), 'minutes)');
             try {
+                // Test if browser is still connected and responsive
+                if (!browser.isConnected()) {
+                    console.log('Browser disconnected, will re-login');
+                    throw new Error('Browser disconnected');
+                }
+                
+                // Test if page is still valid
+                if (page.isClosed()) {
+                    console.log('Page closed, will re-login');
+                    throw new Error('Page closed');
+                }
+                
                 // Test if session is still valid by checking current page
                 const currentUrl = page.url();
                 if (currentUrl.includes('frontlineeducation.com') && !currentUrl.includes('login')) {
                     console.log('Session is still valid');
                     return { browser, page };
+                } else {
+                    console.log('Session expired (redirected to login), will re-login');
+                    throw new Error('Session expired');
                 }
             } catch (error) {
-                console.log('Session test failed, will re-login');
+                console.log('Session test failed, will re-login:', error.message);
+                // Reset session state
+                sessionCookies = null;
+                lastLoginTime = null;
             }
         } else {
             console.log('Session expired (age:', Math.round(sessionAge / 60000), 'minutes), re-logging in');
@@ -459,7 +555,7 @@ async function loginAndMaintainSession() {
         }
     }
 
-    // Launch new browser
+    // Launch new browser with optimized settings
     browser = await puppeteer.launch({
         headless: 'new',
         args: [
@@ -478,7 +574,7 @@ async function loginAndMaintainSession() {
             '--no-first-run',
             '--no-default-browser-check'
         ],
-        protocolTimeout: 120000 // 2 minutes
+        protocolTimeout: 180000 // Increased to 3 minutes
     });
 
     page = await browser.newPage();
@@ -522,7 +618,7 @@ async function loginAndMaintainSession() {
     }
 
     console.log('Login submitted, waiting for page to load...');
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, PAGE_LOAD_TIMEOUT)); // Use configured timeout
 
     const currentUrl = page.url();
     console.log('Current URL after login:', currentUrl);
@@ -541,7 +637,16 @@ async function loginAndMaintainSession() {
     }
 
     // Wait for any dynamic content to load after login
-    await new Promise(resolve => setTimeout(resolve, 3000));
+    await new Promise(resolve => setTimeout(resolve, DYNAMIC_CONTENT_TIMEOUT)); // Use configured timeout
+    
+    // Navigate to substitute home page to ensure we're on the right dashboard
+    console.log('Navigating to substitute home page...');
+    await page.goto('https://absencesub.frontlineeducation.com/Substitute/Home', {
+        waitUntil: 'networkidle2',
+        timeout: 30000
+    });
+    
+    console.log('Successfully navigated to substitute dashboard');
     
     return { browser, page };
 }
@@ -556,6 +661,20 @@ function safeLog(message) {
             // Only re-throw if it's not an EIO error
             throw error;
         }
+    }
+}
+
+// Memory cleanup function
+async function cleanupBrowserResources() {
+    try {
+        if (page && !page.isClosed()) {
+            // Clear caches to free memory
+            await page.evaluate(() => {
+                if (window.gc) window.gc();
+            });
+        }
+    } catch (error) {
+        // Ignore cleanup errors
     }
 }
 
@@ -651,7 +770,6 @@ async function checkForShifts() {
 function extractJobData(job) {
     // Only process jobs with SubstituteId: null (available jobs)
     if (job.SubstituteId !== null) {
-        console.log(`❌ SKIPPING JOB - Already has substitute assigned: ${job.SubstituteId}`);
         return null;
     }
     
@@ -970,7 +1088,12 @@ function extractJobData(job) {
         
         // Add a small delay to ensure checking status is visible in dashboard
         if (settings.checkInterval < 5000) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 1000)); // Reduced from 2s to 1s
+        }
+
+        // Periodically cleanup browser resources to prevent memory leaks
+        if (Math.random() < 0.1) { // 10% chance each check
+            await cleanupBrowserResources();
         }
 
     } catch (error) {
@@ -1363,10 +1486,16 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // Start the Express server
-const PORT = 3000;
+const PORT = 4000;
 // Listen only on localhost for security (accessible only via Nginx proxy)
 app.listen(PORT, '127.0.0.1', async () => {
     console.log(`Dashboard available at ${CONFIG.publicUrl}`);
+    
+    // Load persisted settings on startup
+    console.log('\n=== Loading Persisted Settings ===');
+    loadSettingsFromFile();
+    console.log('====================================\n');
+    
     console.log(`Checking for shifts every ${settings.checkInterval / 60000} minutes`);
     
     // Test email configuration on startup
