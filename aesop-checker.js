@@ -322,8 +322,16 @@ app.post('/api/settings', requireAuth, (req, res) => {
         
         // Update check interval if provided
         if (checkInterval !== undefined) {
-            const newInterval = parseInt(checkInterval);
-            if (newInterval >= 10000) { // Minimum 10 seconds
+            let newInterval = parseInt(checkInterval);
+            console.log(`Received check interval request: ${checkInterval}, parsed as: ${newInterval}ms`);
+            
+            // If the value is small (< 1000), assume it's in seconds and convert to milliseconds
+            if (newInterval < 1000) {
+                console.log(`Detected value in seconds, converting to milliseconds: ${newInterval}s → ${newInterval * 1000}ms`);
+                newInterval = newInterval * 1000;
+            }
+            
+            if (newInterval >= 5000) { // Minimum 5 seconds (reduced from 10 seconds for testing)
                 settings.checkInterval = newInterval;
                 
                 // Restart the interval timer with new frequency
@@ -335,7 +343,8 @@ app.post('/api/settings', requireAuth, (req, res) => {
                 console.log(`✅ Check interval updated to ${settings.checkInterval / 60000} minutes`);
                 settingsChanged = true;
             } else {
-                return res.status(400).json({ error: 'Check interval must be at least 10 seconds' });
+                console.log(`❌ Check interval validation failed: ${newInterval}ms is less than 5000ms`);
+                return res.status(400).json({ error: 'Check interval must be at least 5 seconds (5000ms)' });
             }
         }
         
