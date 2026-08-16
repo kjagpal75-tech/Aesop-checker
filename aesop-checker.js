@@ -442,7 +442,7 @@ async function acceptJobWithSession(jobId, browser, page) {
         console.log('🔍 Navigating to Available Jobs page...');
         await page.goto('https://absencesub.frontlineeducation.com/Substitute/Schedule/AvailableJobs', {
             waitUntil: 'networkidle2',
-            timeout: 60000 // Increased from 30s to 60s for faster check intervals
+            timeout: 30000
         });
 
         await new Promise(resolve => setTimeout(resolve, DYNAMIC_CONTENT_TIMEOUT));
@@ -603,9 +603,9 @@ async function loginAndMaintainSession() {
     global.page = page;
 
     console.log('Navigating to Aesop login page...');
-    await page.goto(CONFIG.aesopUrl, {
-        waitUntil: 'networkidle2',
-        timeout: 90000 // Increased from 60s to 90s for faster check intervals
+    await page.goto(CONFIG.aesopUrl, { 
+        waitUntil: 'networkidle2', 
+        timeout: 60000 
     }).catch(error => {
         throw new Error(`Failed to navigate to Aesop login page: ${error.message}`);
     });
@@ -661,7 +661,7 @@ async function loginAndMaintainSession() {
     console.log('Navigating to substitute home page...');
     await page.goto('https://absencesub.frontlineeducation.com/Substitute/Home', {
         waitUntil: 'networkidle2',
-        timeout: 60000 // Increased from 30s to 60s for faster check intervals
+        timeout: 30000
     });
     
     console.log('Successfully navigated to substitute dashboard');
